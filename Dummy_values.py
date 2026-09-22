@@ -65,28 +65,77 @@ def insert_full_dataset():
         """, opportunities)
         db.commit()
         print("Inserted Opportunities data.")
-
-        # Fetch OpportunityIDs for linking
+        # Fetch OpportunityIDs after insertion
         cursor.execute("SELECT OpportunityID FROM Opportunity ORDER BY OpportunityID")
         opp_ids = [row[0] for row in cursor.fetchall()]
 
-        # Retrieve standard deliverable IDs
-        cursor.execute("SELECT StandardDeliverableItemID FROM StandardDeliverableItems ORDER BY StandardDeliverableItemID")
-        standard_deliverable_ids = [row[0] for row in cursor.fetchall()]
+        # Define detailed deliverables per opportunity index
+        all_deliverables = {
+            0: [  # for opp_ids[0] - Reformer Pilates Experience
+                "1 × Instagram Reel or TikTok featuring the reformer pilates class",
+                "Tag @lyfego.sg and @carvepilates in your post and caption",
+                "Stories or a feed post shared to your audience — either works"
+            ],
+            1: [  # for opp_ids[1] - Tennis Group Class
+                "Post 1 × Instagram Reel or TikTok (minimum 30 seconds) featuring the experience",
+                "Tag @lyfego.sg and @thebestgroup in your post and caption",
+                "Content to be posted within 7 days of attending the session",
+                "Story or feed post shared to your audience at the time of posting"
+            ],
+            2: [  # for opp_ids[2] - Boxing Class Creator Experience
+                "1 × Instagram Reel or TikTok (minimum 30 seconds) featuring the boxing class",
+                "Tag @lyfego.sg and @boxofficefitness.sg in your post and caption",
+                "Content to be posted within 7 days of attending the session",
+                "Story or feed post shared to your audience at the time of posting"
+            ],
+            3: [  # for opp_ids[3] - Bouldering Experience
+                "1 × Instagram post, Reel or TikTok at Boulder Movement",
+                "Tag @lyfego.sg and @bouldermovement.sg in your post and caption",
+                "Content format and angle are up to you — authentic is best"
+            ],
+            4: [  # for opp_ids[4] - Specialty Coffee Experience for Two
+                "1 × Instagram feed post, Reel or TikTok featuring the coffee experience",
+                "Tag @lyfego.sg and @kurasucoffee in your post and caption",
+                "Authentic representation of the experience — no heavy staging required"
+            ],
+            5: [  # for opp_ids[5] - Recovery Experience
+                "1 × feed post or Reel featuring the recovery session",
+                "Tag @lyfego.sg and @rapideatelier in your post and caption",
+                "Stories documenting the session are encouraged but optional"
+            ],
+            6: [  # for opp_ids[6] - Activewear Creator Campaign
+                "1 × Instagram Reel or TikTok wearing FullOut activewear in motion",
+                "Tag @lyfego.sg and @fulloutactivewear in your post and caption",
+                "Post to go live within 14 days of receiving the product",
+                "Story or feed post shared to your audience at the time of posting"
+            ],
+            7: [  # for opp_ids[7] - Healthy Dining Experience for Two
+                "1 × feed post or Reel featuring the dining experience",
+                "Tag @lyfego.sg and @graintraders.sg in your post and caption",
+                "Content can cover the food, the setting or both"
+            ],
+            8: [  # for opp_ids[8] - Wellness Product Creator Campaign
+                "1 × Instagram Reel or TikTok featuring the wellness products in your routine",
+                "Tag @lyfego.sg and @companyofwellness in your post and caption",
+                "Post to go live within 14 days of receiving the product bundle",
+                "Story or feed post shared to your audience at the time of posting"
+            ],
+        }
 
-        # Link every opportunity with every standard deliverable
-        opportunity_deliverable_links = []
-        for opp_id in opp_ids:
-            for std_deliv_id in standard_deliverable_ids:
-                opportunity_deliverable_links.append((opp_id, std_deliv_id))
+        # Build deliverables list for insertion
+        deliverables = []
+        for idx, opp_id in enumerate(opp_ids):
+            items = all_deliverables.get(idx, [])
+            for item in items:
+                deliverables.append((opp_id, item))
 
         cursor.executemany("""
-            INSERT INTO OpportunityDeliverableTemplates (OpportunityID, StandardDeliverableItemID) VALUES (%s, %s)
-        """, opportunity_deliverable_links)
+            INSERT INTO DeliverableItems (OpportunityID, ItemDescription) VALUES (%s, %s)
+        """, deliverables)
         db.commit()
-        print("Inserted OpportunityDeliverableTemplates data.")
+        print("Inserted DeliverableItems data.")
 
-        # AdditionalInformation (2 per opportunity)
+        # Insert AdditionalInformation (2 per opportunity)
         additional_info = []
         for opp_id in opp_ids:
             additional_info.extend([
@@ -99,7 +148,7 @@ def insert_full_dataset():
         db.commit()
         print("Inserted AdditionalInformation data.")
 
-        # Sessions data
+        # Insert Sessions
         sessions = [
             (opp_ids[0], '2026-09-27', '09:00:00', '10:00:00', 10, 'Available', False, None),
             (opp_ids[0], '2026-10-04', '09:00:00', '10:00:00', 10, 'Available', False, None),
@@ -122,7 +171,7 @@ def insert_full_dataset():
         db.commit()
         print("Inserted Sessions data.")
 
-        # Recurring schedule (example)
+        # Insert RecurringSchedule example
         cursor.execute("""
             INSERT INTO RecurringSchedule (OpportunityID, StartDate, EndDate, DayFrequency, StartTime, EndTime, DefaultCreatorSlots)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -130,11 +179,11 @@ def insert_full_dataset():
         db.commit()
         print("Inserted RecurringSchedule data.")
 
-        # Fetch sessions for applications
+        # Fetch Sessions for Applications
         cursor.execute("SELECT SessionID FROM Session ORDER BY SessionID")
         session_ids = [row[0] for row in cursor.fetchall()]
 
-        # Applications 
+        # Insert Applications
         applications = [
             (opp_ids[1], session_ids[3], session_ids[3], 'Accepted', "Sarah Tan", "@sarahtan.fit", "@sarahtan.fit",
              "sarah.tan@gmail.com", "+65 9111 2233",
@@ -158,7 +207,7 @@ def insert_full_dataset():
              "natasha.lim@gmail.com", "+65 9555 6677",
              "CARVE is one of my favourite studios.",
              None, None, None, None, None,
-             '{"Title":"Reformer Pilates Experience","PartnerBrandName":"CARVE Pilates Studio","Category":"Sport","CompensationType":"Barter"}', None, datetime(2026,9,9)),
+             '{"Title":"Reformer Pilates Experience","PartnerBrandName":"CARVE Pilates Studio","Category":"Sport","CompensationType":"Barter"}', "Beginner", datetime(2026,9,9)),
 
             (opp_ids[2], session_ids[6], session_ids[6], 'Accepted', "Ryan Tan", "@ryanboxes", "@ryanboxes",
              "ryan.tan@gmail.com", "+65 9123 0011",
@@ -176,7 +225,6 @@ def insert_full_dataset():
         """, applications)
         db.commit()
         print("Inserted Applications data.")
-
         cursor.close()
         db.close()
         print("\nFull rich dummy data inserted successfully. Ready for use!")
