@@ -136,6 +136,7 @@ def create_lyfego_tables():
                 CorrectedEmailAddress VARCHAR(255),
                 CorrectedMobileWhatsAppNumber VARCHAR(50),
                 SubmissionSnapshot LONGTEXT NOT NULL,
+                ExperienceSkillLevel VARCHAR(100) NOT NULL
                 SubmittedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 ReviewingAt TIMESTAMP NULL,
                 AcceptedAt TIMESTAMP NULL,
