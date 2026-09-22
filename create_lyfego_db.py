@@ -4,6 +4,7 @@ import getpass
 
 ### please make sure you tick "add path" when u download python, set up MySQL and run "pip install mysql-connector-python" in Python MySQL adapter, before u run this file
 
+
 def create_database_if_not_exists(cursor, db_name): ### to check pre-existing tables to prevent overwritting and loss of data
     cursor.execute(f"SHOW DATABASES LIKE '{db_name}'")
     if cursor.fetchone():
@@ -12,7 +13,7 @@ def create_database_if_not_exists(cursor, db_name): ### to check pre-existing ta
         cursor.execute(f"CREATE DATABASE {db_name}")
         print(f"Created database '{db_name}'.")
 
-def create_table_if_not_exists(cursor, table_name, create_sql): ### to check pre-existing tables to prevent overwritting and loss of data
+def create_table_if_not_exists(cursor, table_name, create_sql):  ### to check pre-existing tables to prevent overwritting and loss of data
     cursor.execute("""
         SELECT COUNT(*)
         FROM information_schema.tables
@@ -25,16 +26,18 @@ def create_table_if_not_exists(cursor, table_name, create_sql): ### to check pre
         print(f"Created table '{table_name}'.")
 
 def create_lyfego_tables():
-    user = 'root'
-    password = getpass.getpass("MySQL password: ") ### ur MySQL password
+    user = 'root'  ### adjust or parametrize if needed
+    password = getpass.getpass("MySQL password: ")### ur MySQL password
     db_name = 'lyfego'
     try:
+        ### connecting python to MySQL
         db = mysql.connector.connect(host='localhost', user=user, password=password)
         cursor = db.cursor()
-
+         
         create_database_if_not_exists(cursor, db_name)
         cursor.execute(f"USE {db_name}")
-
+ 
+        #### creating Tables
         create_table_if_not_exists(cursor, 'Opportunity', """
             CREATE TABLE Opportunity (
                 OpportunityID INT AUTO_INCREMENT PRIMARY KEY,
@@ -64,31 +67,12 @@ def create_lyfego_tables():
             );
         """)
 
-        ### New StandardDeliverableItems table (holds unique deliverables)
-        create_table_if_not_exists(cursor, 'StandardDeliverableItems', """
-            CREATE TABLE StandardDeliverableItems (
-                StandardDeliverableItemID INT AUTO_INCREMENT PRIMARY KEY,
-                ItemDescription VARCHAR(500) NOT NULL
-            );
-        """)
-        cursor.executemany("""
-            INSERT INTO StandardDeliverableItems (ItemDescription) VALUES (%s)
-        """, [
-            ("1 Instagram Reel or TikTok featuring the experience",),
-            ("Tag @lyfego.sg and partner in your post and caption",),
-            ("Stories or feed post shared to your audience",),
-        ])
-        db.commit()
-        print("Inserted standard deliverables during DB setup.")
-
-        ###Linking table between Opportunity and Standard Deliverables
-        create_table_if_not_exists(cursor, 'OpportunityDeliverableTemplates', """
-            CREATE TABLE OpportunityDeliverableTemplates (
+        create_table_if_not_exists(cursor, 'DeliverableItems', """
+            CREATE TABLE DeliverableItems (
+                DeliverableItemID INT AUTO_INCREMENT PRIMARY KEY,
                 OpportunityID INT NOT NULL,
-                StandardDeliverableItemID INT NOT NULL,
-                PRIMARY KEY (OpportunityID, StandardDeliverableItemID),
-                FOREIGN KEY (OpportunityID) REFERENCES Opportunity(OpportunityID) ON DELETE CASCADE,
-                FOREIGN KEY (StandardDeliverableItemID) REFERENCES StandardDeliverableItems(StandardDeliverableItemID) ON DELETE CASCADE
+                ItemDescription VARCHAR(500) NOT NULL,
+                FOREIGN KEY (OpportunityID) REFERENCES Opportunity(OpportunityID) ON DELETE CASCADE
             );
         """)
 
@@ -152,7 +136,7 @@ def create_lyfego_tables():
                 CorrectedEmailAddress VARCHAR(255),
                 CorrectedMobileWhatsAppNumber VARCHAR(50),
                 SubmissionSnapshot LONGTEXT NOT NULL,
-                ExperienceSkillLevel VARCHAR(100),
+                ExperienceSkillLevel VARCHAR(100) NOT NULL,
                 SubmittedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 ReviewingAt TIMESTAMP NULL,
                 AcceptedAt TIMESTAMP NULL,
