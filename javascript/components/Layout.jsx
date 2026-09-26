@@ -1,13 +1,17 @@
 import { useEffect } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { LogoMark } from './Icons'
 
 function Header() {
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-line">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center">
         <Link to="/" className="flex items-center gap-2.5 group">
-          <LogoMark className="transition-transform duration-300 group-hover:-translate-y-0.5" />
+          {/* Decorative: the wordmark beside it names the link. */}
+          <img
+            src="/images/logo.png"
+            alt=""
+            className="h-8 w-auto transition-transform duration-300 group-hover:-translate-y-0.5"
+          />
           <div className="flex items-center gap-2">
             <span className="font-display font-bold text-brand text-[18px] tracking-tight leading-none">
               LyfeGo
@@ -28,7 +32,7 @@ function Footer() {
     <footer className="border-t border-line bg-white mt-6">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <LogoMark size={18} />
+          <img src="/images/logo.png" alt="" className="h-5 w-auto" />
           <span className="font-display font-bold text-brand text-sm">LyfeGo</span>
         </div>
         <p className="text-xs text-gray-400">© {new Date().getFullYear()} LyfeGo</p>

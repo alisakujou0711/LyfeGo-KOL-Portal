@@ -1,7 +1,7 @@
 import { Link, Navigate, useParams } from 'react-router-dom'
 import OpportunitySummary from '../javascript/components/OpportunitySummary'
 import { useRegistration } from '../javascript/context/RegistrationContext'
-import { getOpportunity, getSession } from '../javascript/data/opportunities'
+import { useOpportunity } from '../javascript/hooks/useOpportunity'
 import NotFoundPage from './NotFoundPage'
 
 const NEXT_STEPS = [
@@ -30,16 +30,18 @@ function SuccessMark() {
 
 export default function ConfirmationPage() {
   const { id } = useParams()
-  const opportunity = getOpportunity(id)
+  const { status, opportunity } = useOpportunity(id)
   const { submitted } = useRegistration()
 
-  if (!opportunity) return <NotFoundPage />
   // Only reachable right after a successful submit for this opportunity.
-  if (!submitted || submitted.opportunityId !== opportunity.id) {
-    return <Navigate to={`/opportunity/${opportunity.id}`} replace />
+  if (!submitted || submitted.opportunityId !== id) {
+    return <Navigate to={`/opportunity/${id}`} replace />
   }
+  if (status === 'loading') return null
+  if (status === 'notFound') return <NotFoundPage />
 
-  const session = getSession(opportunity, submitted.sessionId)
+  // The Session as the creator chose it; it may have filled since.
+  const session = submitted.session
   const firstName = submitted.fullName.split(/\s+/)[0]
 
   return (
@@ -50,13 +52,14 @@ export default function ConfirmationPage() {
           <h1 className="font-display text-2xl font-bold text-gray-900">Registration received</h1>
           <p className="text-sm text-gray-500 max-w-xs mx-auto leading-relaxed">
             Thanks, {firstName}, for registering for this opportunity. LyfeGo will review your
-            registration and contact you once your participation is confirmed.
+            registration and contact you once your participation is confirmed. Submitting does not
+            guarantee your place.
           </p>
         </div>
       </div>
 
       <div className="animate-fade-up" style={{ animationDelay: '250ms' }}>
-        <OpportunitySummary opportunity={opportunity} session={session} />
+        {opportunity && <OpportunitySummary opportunity={opportunity} session={session} />}
       </div>
 
       <div

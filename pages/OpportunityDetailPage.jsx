@@ -1,65 +1,125 @@
-import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useId, useState } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { BadgeRow } from '../javascript/components/Badge'
 import Button from '../javascript/components/Button'
-import {
-  CheckIcon,
-  ChevronLeftIcon,
-  DollarIcon,
-  GiftIcon,
-  MapPinIcon,
-} from '../javascript/components/Icons'
+import { CheckIcon, ChevronLeftIcon, GiftIcon, MapPinIcon } from '../javascript/components/Icons'
+import OpportunityLoadError from '../javascript/components/OpportunityLoadError'
 import SessionPicker from '../javascript/components/SessionPicker'
 import { useRegistration } from '../javascript/context/RegistrationContext'
-import { getOpportunity, getSession, isFull } from '../javascript/data/opportunities'
-import { formatLongDate, formatShortDate, formatTimeRange } from '../javascript/lib/format'
+import { availableSession, useOpportunity } from '../javascript/hooks/useOpportunity'
+import {
+  compensationLabel,
+  formatAmount,
+  formatBasis,
+  formatLongDate,
+  formatTimeRange,
+  visibleExperienceLevels,
+} from '../javascript/lib/format'
 import NotFoundPage from './NotFoundPage'
 
-function SectionTitle({ children, small = false }) {
-  return small ? (
-    <h3 className="font-display text-sm font-semibold text-gray-900">{children}</h3>
-  ) : (
-    <h2 className="font-display text-base font-semibold text-gray-900">{children}</h2>
-  )
+// Flexible deliverables are subject to later agreement (FS-ADM-FLD-008).
+const DELIVERABLES_INTRO = {
+  Fixed: { heading: 'For this collaboration, the partner is looking for:' },
+  Flexible: {
+    heading: 'Suggested deliverables:',
+    followUp: 'Final deliverables will be discussed and agreed with the partner.',
+  },
 }
 
+// An @handle not preceded by a word character (so emails don't match) and
+// not ending in a full stop.
+const HANDLE_RE = /(?<![\w@])(@[A-Za-z0-9_](?:[A-Za-z0-9_.]*[A-Za-z0-9_])?)/
+
 function Section({ title, children, delay = 0 }) {
+  const id = useId()
   return (
-    <section className="flex flex-col gap-3 animate-fade-up" style={{ animationDelay: `${delay}ms` }}>
-      <SectionTitle>{title}</SectionTitle>
+    <section
+      aria-labelledby={id}
+      className="flex flex-col gap-3 animate-fade-up"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <h2 id={id} className="font-display text-base font-semibold text-gray-900">
+        {title}
+      </h2>
       {children}
     </section>
   )
 }
 
-function PerkBox({ opportunity, compact = false }) {
-  const paid = opportunity.collab === 'Paid'
+function SidebarCard({ title, children, gap = 'gap-3' }) {
+  const id = useId()
   return (
-    <div
-      className={`flex items-center gap-3 text-sm rounded-xl ${compact ? 'px-3 py-2.5' : 'px-4 py-3'} ${
-        paid ? 'bg-amber-50 text-amber-800' : 'bg-surface text-gray-700'
-      }`}
+    <section
+      aria-labelledby={id}
+      className={`bg-white rounded-2xl border border-line p-5 flex flex-col ${gap}`}
     >
-      {paid ? <DollarIcon className="text-amber-500" /> : <GiftIcon className="text-gray-400" />}
-      <span>{opportunity.perkDetail}</span>
+      <h3 id={id} className="font-display text-sm font-semibold text-gray-900">
+        {title}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+function ReceivedItem({ children }) {
+  return (
+    <div className="flex items-center gap-2.5 text-sm text-gray-800 font-medium">
+      <GiftIcon className="text-gray-400" />
+      <span>{children}</span>
     </div>
   )
 }
 
-function CollabNote({ opportunity, className = '' }) {
-  const text =
-    opportunity.collab === 'Paid'
-      ? 'Paid collaboration — a fee is agreed with LyfeGo once your application is accepted.'
-      : 'Barter collaboration — the experience is provided in exchange for agreed content deliverables.'
-  return <p className={`text-xs text-gray-400 leading-relaxed ${className}`}>{text}</p>
+// The BARTER / PAID / PAID + PERK label, then what the creator receives.
+function WhatYouReceive({ opportunity }) {
+  const { payment } = opportunity
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="inline-flex self-start items-center px-2.5 py-1 rounded-lg bg-surface border border-line">
+        <span className="text-[10px] font-bold tracking-widest uppercase text-brand">
+          {compensationLabel(opportunity)}
+        </span>
+      </div>
+      {payment ? (
+        <>
+          <div className="flex flex-col gap-0.5">
+            <span className="font-display text-base font-bold text-gray-900">
+              {formatAmount(payment)}
+            </span>
+            <p className="text-sm text-gray-400">{formatBasis(payment)}</p>
+          </div>
+          {payment.note && <ReceivedItem>{payment.note}</ReceivedItem>}
+        </>
+      ) : (
+        <ReceivedItem>{opportunity.whatCreatorReceives}</ReceivedItem>
+      )}
+    </div>
+  )
 }
 
-function AudienceList({ rows, className = '' }) {
+// A Level chip row (unless Not Applicable), then the Additional Information rows.
+function WhoThisIsFor({ opportunity }) {
+  const levels = visibleExperienceLevels(opportunity)
   return (
-    <div className={`flex flex-col gap-2.5 ${className}`}>
-      {rows.map((row, i) => (
-        <div key={row.label} className="contents">
-          {i > 0 && <div className="border-t border-line-soft" />}
+    <div className="flex flex-col gap-2.5">
+      {levels.length > 0 && (
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-400 w-32 shrink-0">Level</span>
+          <div className="flex flex-wrap gap-1.5">
+            {levels.map((level) => (
+              <span
+                key={level}
+                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-100 text-brand border border-brand/20"
+              >
+                {level}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {opportunity.additionalInfo.map((row, i) => (
+        <div key={`${row.label}-${i}`} className="contents">
+          {(i > 0 || levels.length > 0) && <div className="border-t border-line-soft" />}
           <div className="flex items-start gap-3">
             <span className="text-sm text-gray-400 w-32 shrink-0">{row.label}</span>
             <span className="text-sm text-gray-700">{row.value}</span>
@@ -70,78 +130,86 @@ function AudienceList({ rows, className = '' }) {
   )
 }
 
-function Deliverable({ item }) {
-  let content = item
-  if (typeof item === 'object') {
-    const parts = item.text.split(/(\{\d\})/)
-    content = parts.map((p, i) => {
-      const m = p.match(/^\{(\d)\}$/)
-      return m ? (
-        <span key={i} className="font-medium text-gray-800">
-          {item.handles[Number(m[1])]}
-        </span>
-      ) : (
-        p
-      )
-    })
-  }
+function Deliverable({ text }) {
+  const parts = text.split(HANDLE_RE)
   return (
     <div className="flex items-start gap-3 text-sm text-gray-600">
       <span className="mt-0.5 w-5 h-5 rounded-full bg-brand-100 text-brand flex items-center justify-center shrink-0">
         <CheckIcon />
       </span>
-      <span>{content}</span>
+      <span>
+        {/* split() with a capture group puts the handles at odd indexes */}
+        {parts.map((part, i) =>
+          i % 2 === 1 ? (
+            <strong key={i} className="font-medium text-gray-800">
+              {part}
+            </strong>
+          ) : (
+            part
+          ),
+        )}
+      </span>
     </div>
   )
 }
 
-function SpotsMeta({ opportunity }) {
-  if (opportunity.collab === 'Paid') {
-    return (
-      <div className="flex items-center gap-1.5 text-sm text-gray-500">
-        <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
-        Applications close {formatShortDate(opportunity.deadline)}
-      </div>
-    )
-  }
-  const n = opportunity.spotsLeft
-  if (n === 0) {
+function AvailabilityMeta({ opportunity }) {
+  const { availability, limitedSpots } = opportunity
+  if (availability !== 'open') {
     return (
       <div className="flex items-center gap-1.5 text-sm font-medium text-red-500">
         <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-        All spots taken
+        {availability === 'fully_booked' ? 'Fully booked' : 'Closed'}
       </div>
     )
   }
-  const low = n <= 2
+  if (!limitedSpots) return null
   return (
-    <div
-      className={`flex items-center gap-1.5 text-sm font-medium ${low ? 'text-amber-600' : 'text-gray-500'}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${low ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-      {n} creator {n === 1 ? 'spot' : 'spots'} left
+    <div className="flex items-center gap-1.5 text-sm font-medium text-amber-600">
+      <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-amber-400" />
+      Limited spots
+    </div>
+  )
+}
+
+function DetailSkeleton() {
+  return (
+    <div role="status" aria-label="Loading opportunity" className="animate-pulse">
+      <div className="w-full bg-gray-100" style={{ height: 'clamp(220px, 40vw, 460px)' }} />
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col gap-4">
+        <div className="h-6 w-1/2 rounded bg-gray-100" />
+        <div className="h-4 w-full rounded bg-gray-100" />
+        <div className="h-4 w-5/6 rounded bg-gray-100" />
+        <div className="h-24 rounded-xl bg-gray-100" />
+      </div>
     </div>
   )
 }
 
 export default function OpportunityDetailPage() {
   const { id } = useParams()
+  const { status, opportunity, retry } = useOpportunity(id)
+
+  if (status === 'loading') return <DetailSkeleton />
+  if (status === 'error') return <OpportunityLoadError onRetry={retry} />
+  if (status === 'notFound') return <NotFoundPage />
+  return <OpportunityDetail opportunity={opportunity} />
+}
+
+function OpportunityDetail({ opportunity }) {
   const navigate = useNavigate()
-  const opportunity = getOpportunity(id)
+  // Set when the Register page sent the creator back, e.g. their Session filled.
+  const notice = useLocation().state?.notice
   const { selectedSessionId, selectSession } = useRegistration()
   const [hint, setHint] = useState(0)
 
-  if (!opportunity) return <NotFoundPage />
-
-  const full = isFull(opportunity)
-  const hasSessions = opportunity.sessions.length > 0
-  const sessionId = selectedSessionId(opportunity.id)
-  const session = getSession(opportunity, sessionId)
-  const ready = full ? false : hasSessions ? Boolean(session) : true
+  const open = opportunity.availability === 'open'
+  const intro = DELIVERABLES_INTRO[opportunity.deliverableType]
+  const session = availableSession(opportunity, selectedSessionId(opportunity.id))
 
   const handleRegister = () => {
-    if (full) return
-    if (hasSessions && !session) {
+    if (!open) return
+    if (!session) {
       setHint((n) => n + 1)
       document.getElementById('choose-session')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
@@ -149,15 +217,9 @@ export default function OpportunityDetailPage() {
     navigate(`/opportunity/${opportunity.id}/register`)
   }
 
-  const registerLabel = full
-    ? 'Opportunity Full'
-    : ready
-      ? 'Register for Opportunity →'
-      : 'Register for Opportunity'
-
   const registerButton = (
-    <Button size="md" disabled={full} onClick={handleRegister}>
-      {registerLabel}
+    <Button size="md" disabled={!open} onClick={handleRegister}>
+      {session ? 'Register for Opportunity →' : 'Register for Opportunity'}
     </Button>
   )
 
@@ -188,7 +250,11 @@ export default function OpportunityDetailPage() {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
         <div className="absolute bottom-0 left-0 right-0 px-4 sm:px-6 pb-5 pt-12 max-w-6xl mx-auto animate-fade-up">
-          <BadgeRow opportunity={opportunity} className="mb-3" />
+          <BadgeRow
+            category={opportunity.category}
+            compensationType={opportunity.compensationType}
+            className="mb-3"
+          />
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-white leading-tight mb-1">
             {opportunity.title}
           </h1>
@@ -201,52 +267,65 @@ export default function OpportunityDetailPage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
           <div className="flex items-center gap-1.5 text-sm text-gray-500">
             <MapPinIcon className="text-gray-400" />
-            {opportunity.location}
+            {opportunity.area}
           </div>
-          <SpotsMeta opportunity={opportunity} />
+          <AvailabilityMeta opportunity={opportunity} />
         </div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {notice && (
+          <p
+            role="status"
+            className="mb-6 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 animate-fade-up"
+          >
+            {notice}
+          </p>
+        )}
         <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-10 lg:items-start">
           {/* Main column */}
           <div className="flex flex-col gap-8">
             <Section title="About the Experience" delay={40}>
-              <p className="text-sm text-gray-600 leading-relaxed">{opportunity.about}</p>
+              <p className="text-sm text-gray-600 leading-relaxed">{opportunity.aboutExperience}</p>
             </Section>
 
             {/* Mobile-only copies of the sidebar cards */}
             <div className="lg:hidden flex flex-col gap-4">
               <Section title="What You Receive" delay={80}>
-                <div className="flex flex-col gap-2">
-                  <PerkBox opportunity={opportunity} />
-                  <CollabNote opportunity={opportunity} className="px-1" />
+                <div className="bg-white rounded-xl border border-line px-4 py-3">
+                  <WhatYouReceive opportunity={opportunity} />
                 </div>
               </Section>
               <Section title="Who This Is For" delay={100}>
-                <AudienceList
-                  rows={opportunity.audience}
-                  className="bg-white rounded-xl border border-line px-4 py-3"
-                />
+                <div className="bg-white rounded-xl border border-line px-4 py-3">
+                  <WhoThisIsFor opportunity={opportunity} />
+                </div>
               </Section>
             </div>
 
             <Section title="Content Deliverables" delay={120}>
               <div className="bg-white rounded-xl border border-line px-4 py-4 flex flex-col gap-3">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                  In exchange for this experience, you agree to:
-                </p>
-                {opportunity.deliverables.map((d, i) => (
-                  <Deliverable key={i} item={d} />
+                {opportunity.deliverableNote && (
+                  <p className="text-sm text-gray-600 leading-relaxed">{opportunity.deliverableNote}</p>
+                )}
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    {intro.heading}
+                  </p>
+                  {intro.followUp && <p className="text-xs text-gray-400">{intro.followUp}</p>}
+                </div>
+                {opportunity.deliverables.map((text, i) => (
+                  <Deliverable key={i} text={text} />
                 ))}
               </div>
             </Section>
 
-            {hasSessions && (
+            {(opportunity.weeklyClasses.length > 0 || opportunity.sessions.length > 0) && (
               <Section title="Choose a Session" delay={160}>
                 <SessionPicker
+                  weeklyClasses={opportunity.weeklyClasses}
                   sessions={opportunity.sessions}
-                  selectedId={sessionId}
+                  selectedId={session?.id ?? null}
                   onSelect={(sid) => {
                     selectSession(opportunity.id, sid)
                     if (sid) setHint(0)
@@ -257,39 +336,44 @@ export default function OpportunityDetailPage() {
               </Section>
             )}
 
-            <Section title="Location" delay={200}>
-              <div className="bg-white rounded-xl border border-line px-4 py-3.5 flex items-start gap-3">
-                <div className="mt-0.5">
-                  <MapPinIcon className="text-brand" />
+            {/* Only physical-attendance Opportunities have a venue; the Area is under the title either way. */}
+            {(opportunity.venueName || opportunity.fullAddress) && (
+              <Section title="Location" delay={200}>
+                <div className="bg-white rounded-xl border border-line px-4 py-3.5 flex items-start gap-3">
+                  <div className="mt-0.5">
+                    <MapPinIcon className="text-brand" />
+                  </div>
+                  <div>
+                    {opportunity.venueName && (
+                      <p className="text-sm font-semibold text-gray-900">{opportunity.venueName}</p>
+                    )}
+                    {opportunity.fullAddress && (
+                      <p className="text-sm text-gray-500">{opportunity.fullAddress}</p>
+                    )}
+                    <p className="text-sm text-gray-400">{opportunity.area}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">{opportunity.partner}</p>
-                  <p className="text-sm text-gray-500">{opportunity.address}</p>
-                </div>
-              </div>
-            </Section>
+              </Section>
+            )}
 
             <div className="hidden lg:block">{registerButton}</div>
           </div>
 
           {/* Sidebar */}
           <aside className="hidden lg:flex flex-col gap-5 sticky top-24 animate-fade-up" style={{ animationDelay: '120ms' }}>
-            <div className="bg-white rounded-2xl border border-line p-5 flex flex-col gap-4">
-              <SectionTitle small>What You Receive</SectionTitle>
-              <PerkBox opportunity={opportunity} compact />
-              <CollabNote opportunity={opportunity} />
-            </div>
+            <SidebarCard title="What You Receive" gap="gap-4">
+              <WhatYouReceive opportunity={opportunity} />
+            </SidebarCard>
+
+            <SidebarCard title="Who This Is For">
+              <WhoThisIsFor opportunity={opportunity} />
+            </SidebarCard>
 
             <div className="bg-white rounded-2xl border border-line p-5 flex flex-col gap-3">
-              <SectionTitle small>Who This Is For</SectionTitle>
-              <AudienceList rows={opportunity.audience} />
-            </div>
-
-            <div className="bg-white rounded-2xl border border-line p-5 flex flex-col gap-3">
-              {full ? (
-                <p className="text-sm text-gray-400">
-                  All spots for this opportunity have been taken.
-                </p>
+              {opportunity.availability === 'fully_booked' ? (
+                <p className="text-sm text-gray-400">Every session of this opportunity is fully booked.</p>
+              ) : opportunity.availability === 'closed' ? (
+                <p className="text-sm text-gray-400">This opportunity is no longer accepting registrations.</p>
               ) : session ? (
                 <div
                   key={session.id}
@@ -299,12 +383,8 @@ export default function OpportunityDetailPage() {
                   <br />
                   <span className="font-normal text-gray-500">{formatTimeRange(session)}</span>
                 </div>
-              ) : hasSessions ? (
-                <p className="text-sm text-gray-400">Select a session on the left to continue.</p>
               ) : (
-                <p className="text-sm text-gray-400">
-                  Apply by {formatShortDate(opportunity.deadline)}. No session booking needed.
-                </p>
+                <p className="text-sm text-gray-400">Select a session on the left to continue.</p>
               )}
               {registerButton}
             </div>

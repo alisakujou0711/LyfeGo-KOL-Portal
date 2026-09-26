@@ -3,32 +3,6 @@
 
 const base = { fill: 'none', 'aria-hidden': true }
 
-export function LogoMark({ size = 26, className = '' }) {
-  return (
-    <svg
-      width={size}
-      height={Math.round(size * 1.12)}
-      viewBox="0 0 100 112"
-      className={className}
-      {...base}
-    >
-      <path
-        d="M9 112 L9 50 A41 41 0 0 1 91 50 L91 112"
-        stroke="#F05A28"
-        strokeWidth="10"
-        strokeLinecap="butt"
-      />
-      <path
-        d="M27 112 L27 57 A23 23 0 0 1 73 57 L73 83 L55 83"
-        stroke="#F05A28"
-        strokeWidth="10"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 export function MapPinIcon({ className = '' }) {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" className={`shrink-0 ${className}`} {...base}>
@@ -83,21 +57,6 @@ export function DollarIcon({ className = '' }) {
         strokeWidth="1.4"
         strokeLinecap="round"
       />
-    </svg>
-  )
-}
-
-export function SportIcon({ className = '' }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" className={`shrink-0 ${className}`} {...base}>
-      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M8 1.5C8 4 5.5 6.5 3 7M8 1.5C8 4 10.5 6.5 13 7M8 14.5C8 12 5.5 9.5 3 9M8 14.5C8 12 10.5 9.5 13 9"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-      />
-      <path d="M1.5 8h13" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   )
 }

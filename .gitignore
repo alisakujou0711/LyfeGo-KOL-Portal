@@ -15,4 +15,10 @@ Thumbs.db
 npm-debug.log*
 
 # staging copy for manual upload
-gitcommit
+gitcommit*
+
+# backend
+.env
+.venv
+__pycache__
+.pytest_cache

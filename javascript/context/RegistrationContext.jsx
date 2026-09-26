@@ -2,15 +2,17 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 // Holds the user's in-progress registration (chosen session per opportunity,
 // form draft) and the last submitted registration for the confirmation page.
-// Persisted to sessionStorage so a refresh mid-flow doesn't lose progress.
+// The in-progress parts are persisted to sessionStorage so a refresh mid-flow
+// doesn't lose progress; the submitted registration is kept in memory only, so
+// a refreshed confirmation page redirects instead of showing (or resubmitting).
 
 const STORAGE_KEY = 'lyfego.registration'
 const RegistrationContext = createContext(null)
 
 function load() {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
+    const { sessions = {}, drafts = {} } = JSON.parse(sessionStorage.getItem(STORAGE_KEY)) ?? {}
+    return { sessions, drafts }
   } catch {
     return {}
   }
@@ -26,7 +28,8 @@ export function RegistrationProvider({ children }) {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      const { sessions, drafts } = state
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions, drafts }))
     } catch {
       /* storage unavailable — keep state in memory only */
     }

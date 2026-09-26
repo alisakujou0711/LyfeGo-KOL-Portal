@@ -1,6 +1,6 @@
 const STYLES = {
-  Sport: 'bg-blue-50/90 text-blue-600',
-  Lifestyle: 'bg-violet-50/90 text-violet-600',
+  Sport: 'bg-brand/90 text-white',
+  Lifestyle: 'bg-white/90 text-brand ring-1 ring-brand/50',
   Barter: 'bg-emerald-50/90 text-emerald-700',
   Paid: 'bg-amber-50/90 text-amber-700',
 }
@@ -17,11 +17,12 @@ export default function Badge({ label }) {
   )
 }
 
-export function BadgeRow({ opportunity, className = '' }) {
+// Category and Compensation Type, as separate badges.
+export function BadgeRow({ category, compensationType, className = '' }) {
   return (
     <div className={`flex gap-1.5 ${className}`}>
-      <Badge label={opportunity.category} />
-      <Badge label={opportunity.collab} />
+      <Badge label={category} />
+      <Badge label={compensationType} />
     </div>
   )
 }

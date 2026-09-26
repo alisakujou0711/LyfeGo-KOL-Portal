@@ -3,24 +3,58 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import Button from '../javascript/components/Button'
 import FormField from '../javascript/components/FormField'
 import { ChevronLeftIcon } from '../javascript/components/Icons'
+import OpportunityLoadError from '../javascript/components/OpportunityLoadError'
 import OpportunitySummary from '../javascript/components/OpportunitySummary'
 import { useRegistration } from '../javascript/context/RegistrationContext'
-import { getOpportunity, getSession, isFull } from '../javascript/data/opportunities'
-import { submitRegistration } from '../javascript/lib/api'
+import { availableSession, useOpportunity } from '../javascript/hooks/useOpportunity'
+import { ApiError, submitApplication } from '../javascript/lib/api'
 import { EMPTY_FORM, stripHandle, validateRegistration } from '../javascript/lib/validation'
 import NotFoundPage from './NotFoundPage'
 
+// Whether the API rejected a field the creator can see and fix (not e.g. sessionId).
+function hasFormField(fieldErrors) {
+  return Object.keys(fieldErrors).some((field) => field in EMPTY_FORM)
+}
+
+const SESSION_UNAVAILABLE =
+  'The session you chose is no longer available. Please choose another session.'
+
 export default function RegisterPage() {
   const { id } = useParams()
+  const { status, opportunity, retry } = useOpportunity(id)
+  const { selectedSessionId } = useRegistration()
+
+  if (status === 'loading') return null
+  if (status === 'error') return <OpportunityLoadError onRetry={retry} />
+  if (status === 'notFound') return <NotFoundPage />
+  const chosenId = opportunity && selectedSessionId(opportunity.id)
+  const session = chosenId && availableSession(opportunity, chosenId)
+  // Guard: registering needs an open Opportunity and a chosen Session that is
+  // still available now (the Opportunity was just refetched).
+  if (!session || opportunity.availability !== 'open') {
+    const state = chosenId ? { notice: SESSION_UNAVAILABLE } : undefined
+    return <Navigate to={`/opportunity/${id}`} replace state={state} />
+  }
+  return <RegisterForm opportunity={opportunity} session={session} />
+}
+
+function RegisterForm({ opportunity, session }) {
+  const id = opportunity.id
   const navigate = useNavigate()
-  const opportunity = getOpportunity(id)
-  const { selectedSessionId, draft, saveDraft, setSubmitted } = useRegistration()
+  const { draft, saveDraft, setSubmitted } = useRegistration()
 
   const [values, setValues] = useState(() => ({ ...EMPTY_FORM, ...(draft(id) ?? {}) }))
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState('')
+  // { message, conflict }: `conflict` when the Session can no longer be applied for.
+  const [submitError, setSubmitError] = useState(null)
   const [attempt, setAttempt] = useState(0)
+  // One key per form instance, reused on every retry, so a retry of a
+  // submission that actually reached the server never creates a duplicate.
+  const [submissionKey] = useState(() => crypto.randomUUID())
+  // Set synchronously, unlike `submitting`, so clicks that land before React
+  // re-renders the disabled button can't send a second request.
+  const inFlight = useRef(false)
   const formRef = useRef(null)
 
   // After a failed submit, move focus to the first invalid field (runs after
@@ -32,18 +66,8 @@ export default function RegisterPage() {
   // Persist the draft as the user types so navigating back to change the
   // session doesn't wipe the form.
   useEffect(() => {
-    if (opportunity) saveDraft(opportunity.id, values)
-  }, [values, opportunity, saveDraft])
-
-  if (!opportunity) return <NotFoundPage />
-
-  const hasSessions = opportunity.sessions.length > 0
-  const session = getSession(opportunity, selectedSessionId(opportunity.id))
-
-  // Guard: can't register for a full opportunity, or without a session where one is required.
-  if (isFull(opportunity) || (hasSessions && !session)) {
-    return <Navigate to={`/opportunity/${opportunity.id}`} replace />
-  }
+    saveDraft(id, values)
+  }, [values, id, saveDraft])
 
   const update = (field) => (e) => {
     const value = e.target.value
@@ -53,32 +77,44 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (inFlight.current) return
     const nextErrors = validateRegistration(values)
     setErrors(nextErrors)
-    setSubmitError('')
+    setSubmitError(null)
 
     if (Object.keys(nextErrors).length > 0) {
       setAttempt((n) => n + 1)
       return
     }
 
+    inFlight.current = true
     setSubmitting(true)
     try {
       const payload = {
         opportunityId: opportunity.id,
-        sessionId: session?.id ?? null,
+        sessionId: session.id,
         fullName: values.fullName.trim(),
         instagram: stripHandle(values.instagram),
         tiktok: stripHandle(values.tiktok),
         email: values.email.trim(),
         phone: values.phone.trim(),
         note: values.note.trim(),
+        submissionKey,
       }
-      const result = await submitRegistration(payload)
-      setSubmitted({ ...payload, id: result.id, submittedAt: Date.now() })
+      const result = await submitApplication(payload)
+      setSubmitted({ ...payload, session, id: result.id, submittedAt: Date.now() })
       navigate(`/opportunity/${opportunity.id}/confirmation`, { replace: true })
-    } catch {
-      setSubmitError('Something went wrong while submitting. Please try again.')
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setSubmitError({ message: error.message, conflict: true })
+      } else if (error instanceof ApiError && error.status === 422 && hasFormField(error.fieldErrors)) {
+        setErrors(error.fieldErrors)
+        setAttempt((n) => n + 1)
+        setSubmitError({ message: error.message })
+      } else {
+        setSubmitError({ message: 'Something went wrong while submitting. Please try again.' })
+      }
+      inFlight.current = false
       setSubmitting(false)
     }
   }
@@ -103,14 +139,12 @@ export default function RegisterPage() {
             opportunity={opportunity}
             session={session}
             action={
-              hasSessions && (
-                <Link
-                  to={`/opportunity/${opportunity.id}#choose-session`}
-                  className="self-start text-xs font-medium text-brand hover:underline"
-                >
-                  Change session
-                </Link>
-              )
+              <Link
+                to={`/opportunity/${opportunity.id}#choose-session`}
+                className="self-start text-xs font-medium text-brand hover:underline"
+              >
+                Change session
+              </Link>
             }
           />
         </div>
@@ -188,14 +222,23 @@ export default function RegisterPage() {
               placeholder="Anything you'd like LyfeGo to know — your content style, audience size, relevant experience, etc."
               value={values.note}
               onChange={update('note')}
+              error={errors.note}
             />
           </div>
 
           <div className="flex flex-col gap-3">
             {submitError && (
-              <p role="alert" className="text-sm text-red-500 text-center animate-shake">
-                {submitError}
-              </p>
+              <div role="alert" className="text-sm text-red-500 text-center animate-shake">
+                <p>{submitError.message}</p>
+                {submitError.conflict && (
+                  <Link
+                    to={`/opportunity/${opportunity.id}#choose-session`}
+                    className="mt-1 inline-block font-semibold text-brand hover:underline"
+                  >
+                    Choose another session
+                  </Link>
+                )}
+              </div>
             )}
             <Button type="submit" size="lg" loading={submitting}>
               {submitting ? 'Submitting…' : 'Submit Registration'}
