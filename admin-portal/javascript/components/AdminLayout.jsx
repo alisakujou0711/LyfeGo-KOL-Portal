@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { ExternalIcon } from '../../../creator-portal/javascript/components/Icons'
 
 const ICON_PROPS = { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', className: 'shrink-0', 'aria-hidden': true }
 const STROKE = { stroke: 'currentColor', strokeWidth: 1.4 }
@@ -40,15 +41,6 @@ function CreatorsIcon() {
       <circle cx="6" cy="5" r="2.5" {...STROKE} />
       <path d="M1 13.5c0-2.76 2.24-5 5-5s5 2.24 5 5" {...STROKE} strokeLinecap="round" />
       <path d="M11 2.5a2.5 2.5 0 0 1 0 5M15 13.5c0-2.24-1.57-4.13-3.73-4.78" {...STROKE} strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function ExternalIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" className="shrink-0" aria-hidden="true">
-      <path d="M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7.5" {...STROKE} strokeLinecap="round" />
-      <path d="M8 1.5h3.5V5M11.5 1.5L6.5 6.5" {...STROKE} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

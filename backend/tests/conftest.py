@@ -1,14 +1,16 @@
+import secrets
 from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.admins import add_admin
+from app.admins import COOKIE, hash_password, token_hash
 from app.clock import now_sgt
 from app.config import get_settings, load_settings
 from app.db import connect
 from app.main import app
 from create_lyfego_db import TABLES, create_tables
+from tests.factories import NOW
 
 # Hard-coded so a misconfigured env file can never point the drop below at the
 # real database.
@@ -67,18 +69,37 @@ def at():
 
 
 @pytest.fixture
-def sign_in(client, test_settings):
-    """`sign_in()` adds an Admin and signs `client` in as them."""
+def frozen_now(at):
+    """Freeze the API's clock at factories.NOW; a module opts in with
+    `pytestmark = pytest.mark.usefixtures("frozen_now")`."""
+    at(NOW)
+
+
+@pytest.fixture(scope="session")
+def admin_password_hash():
+    # Hashed once per run: the password hash is slow on purpose. test_admin_sign_in
+    # covers signing in itself.
+    return hash_password("correct horse battery")
+
+
+@pytest.fixture
+def sign_in(client, test_settings, admin_password_hash):
+    """`sign_in()` adds an Admin and signs `client` in as them, as signing in does:
+    a session row and its token in the cookie."""
 
     def sign_in_as_admin():
+        token = secrets.token_urlsafe(32)
         conn = connect(test_settings)
         try:
-            add_admin(conn, email="staff@lyfego.test", password="correct horse battery", name="Staff")
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO AdminUser (Email, PasswordHash, Name) VALUES (%s, %s, %s)",
+                           ("staff@lyfego.test", admin_password_hash, "Staff"))
+            cursor.execute("INSERT INTO AdminSession (TokenHash, AdminUserID) VALUES (%s, %s)",
+                           (token_hash(token), cursor.lastrowid))
+            conn.commit()
         finally:
             conn.close()
-        response = client.post("/api/admin/session",
-                               json={"email": "staff@lyfego.test", "password": "correct horse battery"})
-        assert response.status_code == 200
+        client.cookies.set(COOKIE, token, domain="testserver.local", path="/api")
 
     return sign_in_as_admin
 

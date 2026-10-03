@@ -12,6 +12,8 @@ import secrets
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
+
 MAX_BYTES = 5 * 1024 * 1024
 UPLOADS_URL = "/api/uploads"
 
@@ -38,7 +40,7 @@ async def store_upload(chunks: AsyncIterator[bytes], directory: Path) -> str:
         raise Refused(WRONG_TYPE)
     name = f"{secrets.token_hex(16)}.{extension}"
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / name).write_bytes(content)
+    await run_in_threadpool((directory / name).write_bytes, content)  # don't block other requests meanwhile
     return f"{UPLOADS_URL}/{name}"
 
 

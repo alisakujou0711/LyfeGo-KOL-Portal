@@ -51,7 +51,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from app.opportunities import SHORT_WEEKDAYS, schedule_weekdays, session_times
+from app.db import insert, placeholders, transaction, update
+from app.opportunities import (
+    ACCEPTED_COUNT, SHORT_WEEKDAYS, hhmm, lock_opportunity_sessions, schedule_weekdays, session_times,
+)
 
 # A Recurring Schedule without an End Date keeps this window of future Sessions (FS-ADM-SES-008).
 ROLLING_WINDOW = timedelta(weeks=8)
@@ -109,42 +112,34 @@ class SchedulePlan:
                     WHERE SessionID = %s""",
                 (session["date"], session["start"], session["end"], session["slots"], session["id"]),
             )
-        for session_id in self.cancels:
-            cursor.execute("UPDATE Session SET IsCancelled = TRUE WHERE SessionID = %s", (session_id,))
-        for session_id in self.reopens:
-            cursor.execute("UPDATE Session SET IsCancelled = FALSE WHERE SessionID = %s", (session_id,))
+        _for_sessions(cursor, "UPDATE Session SET IsCancelled = TRUE", self.cancels)
+        _for_sessions(cursor, "UPDATE Session SET IsCancelled = FALSE", self.reopens)
         for session_id, slots in self.overrides:
             cursor.execute("UPDATE Session SET CreatorSlots = %s, SlotsOverridden = TRUE WHERE SessionID = %s",
                            (slots, session_id))
-        for session_id in self.deletes:
-            cursor.execute("DELETE FROM Session WHERE SessionID = %s", (session_id,))
+        _for_sessions(cursor, "DELETE FROM Session", self.deletes)
 
         if self.schedule is None:
             if self.schedule_id is not None:
                 # Its past Sessions keep their RecurrenceID, which then counts as one-off.
-                for session_id in self.detach:
-                    cursor.execute("UPDATE Session SET RecurrenceID = NULL WHERE SessionID = %s", (session_id,))
+                _for_sessions(cursor, "UPDATE Session SET RecurrenceID = NULL", self.detach)
                 cursor.execute("DELETE FROM RecurringSchedule WHERE RecurrenceID = %s", (self.schedule_id,))
             return
-        columns = dict(self.schedule)
         schedule_id = self.schedule_id
         if schedule_id is None:
-            columns["OpportunityID"] = opportunity_id
-            cursor.execute(
-                f"INSERT INTO RecurringSchedule ({', '.join(columns)}) VALUES ({_placeholders(list(columns))})",
-                list(columns.values()),
-            )
-            schedule_id = cursor.lastrowid
+            schedule_id = insert(cursor, "RecurringSchedule", {**self.schedule, "OpportunityID": opportunity_id})
         else:
-            cursor.execute(
-                f"UPDATE RecurringSchedule SET {', '.join(f'{column} = %s' for column in columns)} WHERE RecurrenceID = %s",
-                [*columns.values(), schedule_id],
-            )
+            update(cursor, "RecurringSchedule", self.schedule, where="RecurrenceID", key=schedule_id)
         slots = self.schedule["DefaultCreatorSlots"]
-        for session_id in self.reslot:
-            cursor.execute("UPDATE Session SET CreatorSlots = %s WHERE SessionID = %s", (slots, session_id))
+        _for_sessions(cursor, "UPDATE Session SET CreatorSlots = %s", self.reslot, slots)
         if self.generate:
             cursor.executemany(_INSERT_SESSION, [(opportunity_id, *times, slots, schedule_id) for times in self.generate])
+
+
+def _for_sessions(cursor, statement: str, session_ids: list[int], *params) -> None:
+    """Run `statement` (an UPDATE or DELETE on Session, with `params`) on every Session in `session_ids` at once."""
+    if session_ids:
+        cursor.execute(f"{statement} WHERE SessionID IN ({placeholders(session_ids)})", [*params, *session_ids])
 
 
 def generated_times(weekdays: list[int], start: str, end: str, start_date: date, end_date: date | None, *,
@@ -372,23 +367,23 @@ def _below_accepted(accepted: int) -> str:
     return f"Creator Slots can't be lower than the {accepted} creator{'' if accepted == 1 else 's'} already accepted"
 
 
-def top_up_rolling_windows(conn, *, now: datetime) -> None:
+def top_up_rolling_windows(conn, *, now: datetime, opportunity_ids: list[int] | None = None) -> None:
     """Generate the Sessions each open-ended Recurring Schedule is missing as of
     `now`, so it keeps ROLLING_WINDOW of future Sessions without a cron job
-    (FS-ADM-SES-008). Idempotent: call it before any read of Sessions. A date and
-    time another non-cancelled Session of the Opportunity has is skipped, and so
-    is one the Recurring Schedule has a Cancelled Session at."""
+    (FS-ADM-SES-008). Idempotent: call it before any read of Sessions, limited to
+    `opportunity_ids` when the read covers only those. A date and time another
+    non-cancelled Session of the Opportunity has is skipped, and so is one the
+    Recurring Schedule has a Cancelled Session at."""
     cursor = conn.cursor(dictionary=True)
-    missing = _missing_sessions(cursor, now)
+    missing = _missing_sessions(cursor, now, opportunity_ids)
     conn.commit()  # end the read's implicit transaction
     if not missing:
         return
     opportunity_ids = sorted({session[0] for session in missing})
-    conn.start_transaction(isolation_level="READ COMMITTED")
-    try:
+    with transaction(conn, isolation_level="READ COMMITTED"):
         # Lock the Opportunities first, as a save does, so a save and a top-up wait for each other.
         cursor.execute(
-            f"SELECT OpportunityID FROM Opportunity WHERE OpportunityID IN ({_placeholders(opportunity_ids)})"
+            f"SELECT OpportunityID FROM Opportunity WHERE OpportunityID IN ({placeholders(opportunity_ids)})"
             " ORDER BY OpportunityID FOR UPDATE",
             opportunity_ids,
         )
@@ -396,17 +391,13 @@ def top_up_rolling_windows(conn, *, now: datetime) -> None:
         missing = _missing_sessions(cursor, now, opportunity_ids)
         if missing:
             cursor.executemany(_INSERT_SESSION, missing)
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
 
 
 def _missing_sessions(cursor, now: datetime, opportunity_ids: list[int] | None = None) -> list[tuple]:
     """The Sessions open-ended Recurring Schedules are missing, as rows for _INSERT_SESSION."""
     query = "SELECT * FROM RecurringSchedule WHERE EndDate IS NULL"
     if opportunity_ids is not None:
-        query += f" AND OpportunityID IN ({_placeholders(opportunity_ids)})"
+        query += f" AND OpportunityID IN ({placeholders(opportunity_ids)})"
     cursor.execute(query + " ORDER BY RecurrenceID", opportunity_ids or ())
     schedules = cursor.fetchall()
     if not schedules:
@@ -414,7 +405,7 @@ def _missing_sessions(cursor, now: datetime, opportunity_ids: list[int] | None =
     ids = sorted({schedule["OpportunityID"] for schedule in schedules})
     cursor.execute(
         f"""SELECT OpportunityID, SessionDate, StartTime, EndTime, IsCancelled, RecurrenceID FROM Session
-             WHERE SessionDate >= %s AND OpportunityID IN ({_placeholders(ids)})""",
+             WHERE SessionDate >= %s AND OpportunityID IN ({placeholders(ids)})""",
         [now.date(), *ids],
     )
     taken = defaultdict(set)  # Opportunity id: the dates and times its non-cancelled Sessions have
@@ -426,9 +417,8 @@ def _missing_sessions(cursor, now: datetime, opportunity_ids: list[int] | None =
             taken[session["OpportunityID"]].add(_times(session))
     missing = []
     for schedule in schedules:
-        settings = session_times({**schedule, "SessionDate": schedule["StartDate"]})
-        for times in generated_times(schedule_weekdays(schedule), settings["start"], settings["end"],
-                                     schedule["StartDate"], None, now=now):
+        for times in generated_times(schedule_weekdays(schedule), hhmm(schedule["StartTime"]),
+                                     hhmm(schedule["EndTime"]), schedule["StartDate"], None, now=now):
             if times not in taken[schedule["OpportunityID"]] and times not in cancelled[schedule["RecurrenceID"]]:
                 taken[schedule["OpportunityID"]].add(times)
                 missing.append((schedule["OpportunityID"], *times, schedule["DefaultCreatorSlots"],
@@ -436,29 +426,31 @@ def _missing_sessions(cursor, now: datetime, opportunity_ids: list[int] | None =
     return missing
 
 
-def _schedule_id(cursor, opportunity_id) -> int | None:
-    """The Opportunity's Recurring Schedule, the one the form edits: its first."""
-    cursor.execute("SELECT RecurrenceID FROM RecurringSchedule WHERE OpportunityID = %s ORDER BY RecurrenceID LIMIT 1",
+def form_schedule(cursor, opportunity_id) -> dict | None:
+    """The Opportunity's Recurring Schedule the form edits, its first, as a dictionary row; None when it has none."""
+    cursor.execute("SELECT * FROM RecurringSchedule WHERE OpportunityID = %s ORDER BY RecurrenceID LIMIT 1",
                    (opportunity_id,))
-    row = cursor.fetchone()
-    return None if row is None else row["RecurrenceID"]
+    return cursor.fetchone()
+
+
+def _schedule_id(cursor, opportunity_id) -> int | None:
+    schedule = form_schedule(cursor, opportunity_id)
+    return None if schedule is None else schedule["RecurrenceID"]
 
 
 def _stored_sessions(cursor, opportunity_id) -> dict[int, dict]:
     """Every Session of the Opportunity, locked, with its Accepted Count and whether
     any Application names it, keyed by id. A RecurrenceID with no Recurring Schedule
     behind it counts as one-off (it has no foreign key)."""
-    cursor.execute("SELECT SessionID FROM Session WHERE OpportunityID = %s FOR UPDATE", (opportunity_id,))
-    cursor.fetchall()
+    lock_opportunity_sessions(cursor, opportunity_id)
     # Read after the lock, in a separate non-locking read, so the counts see every
     # Application committed before it (READ COMMITTED).
     cursor.execute(
-        """SELECT s.SessionID, s.SessionDate, s.StartTime, s.EndTime, s.CreatorSlots, s.IsCancelled,
+        f"""SELECT s.SessionID, s.SessionDate, s.StartTime, s.EndTime, s.CreatorSlots, s.IsCancelled,
                   s.SlotsOverridden,
                   (SELECT r.RecurrenceID FROM RecurringSchedule r
                     WHERE r.RecurrenceID = s.RecurrenceID AND r.OpportunityID = s.OpportunityID) AS RecurrenceID,
-                  (SELECT COUNT(*) FROM Application a
-                    WHERE a.CurrentSessionID = s.SessionID AND a.Status = 'Accepted') AS AcceptedCount,
+                  {ACCEPTED_COUNT},
                   EXISTS (SELECT 1 FROM Application a
                            WHERE a.CurrentSessionID = s.SessionID OR a.OriginalSessionID = s.SessionID)
                     AS HasApplications
@@ -483,6 +475,3 @@ def _times(session: dict) -> Times:
         return session["SessionDate"], times["start"], times["end"]
     return session["date"], session["start"], session["end"]
 
-
-def _placeholders(values: list) -> str:
-    return ", ".join(["%s"] * len(values))

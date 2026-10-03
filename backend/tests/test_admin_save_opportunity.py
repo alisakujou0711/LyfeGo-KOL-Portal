@@ -4,87 +4,14 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tests.factories import PAID, add_application, add_deliverable, add_info, add_opportunity, add_schedule, add_session
-
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
-
-
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+from tests.admin_api import EMPTY_FORM, FILLED_FORM, create, created, editing, form_of, save
+from tests.factories import (
+    NOW, PAID, TOMORROW_10AM, add_application, add_deliverable, add_info, add_opportunity, add_schedule,
+    add_session,
+)
 
 
-# What the form sends when nothing has been typed: only its defaults.
-EMPTY_FORM = {
-    "title": "", "partner": "", "category": "Sport", "subcategory": "", "heroImage": "",
-    "aboutExperience": "",
-    "compensationType": "Barter", "whatCreatorReceives": "",
-    "currency": "SGD", "paymentAmount": None, "paymentBasis": None, "paymentNotes": "",
-    "collaborationType": "One-off",
-    "deliverableType": "Fixed", "deliverableNote": "", "deliverables": [""],
-    "experienceLevels": ["All Levels"], "additionalInfo": [],
-    "scheduleType": "specific",
-    "sessions": [{"date": "", "start": "", "end": "", "slots": ""}],
-    "recurring": {"days": [], "start": "", "end": "", "startDate": "", "endDate": "", "slots": ""},
-    "venueName": "", "fullAddress": "", "area": "",
-    "publishingStatus": "Draft",
-}
-
-FILLED_FORM = {
-    **EMPTY_FORM,
-    "title": "Bouldering Experience",
-    "partner": "Boulder Movement",
-    "category": "Sport",
-    "subcategory": "Bouldering",
-    "heroImage": "https://images.example/boulder.jpg",
-    "aboutExperience": "An intro bouldering session.",
-    "compensationType": "Paid",
-    "currency": "USD",
-    "paymentAmount": 150,
-    "paymentBasis": "Per post",
-    "paymentNotes": "Paid within 14 days",
-    "collaborationType": "One-off or Ongoing",
-    "deliverableType": "Flexible",
-    "deliverableNote": "Final deliverables agreed with the partner.",
-    "deliverables": ["1 × Instagram Reel", "3 × Stories"],
-    "experienceLevels": ["Intermediate"],
-    "additionalInfo": [{"label": "Equipment", "value": "Climbing shoes provided"}],
-    "sessions": [
-        {"date": "2026-09-30", "start": "18:00", "end": "19:30", "slots": "3"},
-        {"date": "2026-10-02", "start": "09:00", "end": "10:00", "slots": "4"},
-    ],
-    "venueName": "Boulder Movement Tai Seng",
-    "fullAddress": "18 Tai Seng Street",
-    "area": "Tai Seng",
-}
-
-
-def create(client, form):
-    return client.post("/api/admin/opportunities", json=form)
-
-
-def created(client, form):
-    response = create(client, form)
-    assert response.status_code == 201, response.json()
-    return response.json()
-
-
-def editing(client, opportunity_id):
-    response = client.get(f"/api/admin/opportunities/{opportunity_id}")
-    assert response.status_code == 200, response.json()
-    return response.json()
-
-
-def save(client, opportunity_id, form):
-    return client.put(f"/api/admin/opportunities/{opportunity_id}", json=form)
-
-
-def form_of(saved):
-    """The form fields of a saved Opportunity, as the edit page sends them back: without
-    its id and version, and with its Session rows' ids, so the save keeps those Sessions."""
-    return {key: value for key, value in saved.items() if key not in ("id", "version")}
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def as_entered(sessions):

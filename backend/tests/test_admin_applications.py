@@ -6,17 +6,14 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.db import connect
-from tests.factories import PAID, add_application, add_opportunity, add_session
+from app.opportunities import lock_session
+from tests.factories import NOW, PAID, TOMORROW_10AM, add_application, add_opportunity, add_session
 
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
+
 SATURDAY_8PM = datetime(2026, 9, 26, 20, 0)
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def admin_list(client, **params):
@@ -441,30 +438,34 @@ def test_two_admins_racing_for_the_last_slot_cannot_both_win(client, db, signed_
     session = add_session(db, opp, TOMORROW_10AM, slots=1)
     first, second = add_application(db, opp, session), add_application(db, opp, session)
 
-    # Hold the Session's row lock so both requests reach the capacity check
-    # and wait there, then let them race.
+    # Both requests reach the capacity check and wait there, then race.
+    responses = _race_on_session_lock(test_settings, session, {
+        a: lambda a=a: update(client, a, status="Accepted") for a in (first, second)})
+
+    assert sorted(r.status_code for r in responses.values()) == [200, 409]
+    assert sorted(detail(client, a)["status"] for a in (first, second)) == ["Accepted", "New"]
+
+
+def _race_on_session_lock(test_settings, session_id, requests: dict) -> dict:
+    """Start every one of `requests` (callables, by key) while another transaction
+    holds the Session's row lock, so they all wait at the same point, then
+    release it and let them race; returns their responses by key."""
+    responses = {}
+    threads = [threading.Thread(target=lambda key=key, request=request: responses.__setitem__(key, request()))
+               for key, request in requests.items()]
     blocker = connect(test_settings)
     try:
         blocker.start_transaction()
-        cursor = blocker.cursor()
-        cursor.execute("SELECT SessionID FROM Session WHERE SessionID = %s FOR UPDATE", (session,))
-        cursor.fetchall()
-        responses = {}
-        threads = [
-            threading.Thread(target=lambda a=a: responses.__setitem__(a, update(client, a, status="Accepted")))
-            for a in (first, second)
-        ]
+        lock_session(blocker.cursor(), session_id)
         for thread in threads:
             thread.start()
-        _wait_for_lock_waits(blocker, 2)
+        _wait_for_lock_waits(blocker, len(threads))
     finally:
         blocker.rollback()
         blocker.close()
     for thread in threads:
         thread.join(timeout=30)
-
-    assert sorted(r.status_code for r in responses.values()) == [200, 409]
-    assert sorted(detail(client, a)["status"] for a in (first, second)) == ["Accepted", "New"]
+    return responses
 
 
 def _wait_for_lock_waits(conn, expected, timeout=10.0):
@@ -800,27 +801,9 @@ def test_two_admins_moving_accepted_applications_into_the_last_slot_cannot_both_
     first = add_application(db, opp, add_session(db, opp, TOMORROW_10AM), status="Accepted")
     second = add_application(db, opp, add_session(db, opp, TOMORROW_10AM + timedelta(hours=2)), status="Accepted")
 
-    # Hold the target Session's row lock so both moves wait there, then let them race.
-    blocker = connect(test_settings)
-    try:
-        blocker.start_transaction()
-        cursor = blocker.cursor()
-        cursor.execute("SELECT SessionID FROM Session WHERE SessionID = %s FOR UPDATE", (target,))
-        cursor.fetchall()
-        responses = {}
-        threads = [
-            threading.Thread(
-                target=lambda a=a: responses.__setitem__(a, update(client, a, sessionId=str(target))))
-            for a in (first, second)
-        ]
-        for thread in threads:
-            thread.start()
-        _wait_for_lock_waits(blocker, 2)
-    finally:
-        blocker.rollback()
-        blocker.close()
-    for thread in threads:
-        thread.join(timeout=30)
+    # Both moves wait at the target Session's lock, then race.
+    responses = _race_on_session_lock(test_settings, target, {
+        a: lambda a=a: update(client, a, sessionId=str(target)) for a in (first, second)})
 
     assert sorted(r.status_code for r in responses.values()) == [200, 409]
     assert sorted(detail(client, a)["session"]["id"] == str(target) for a in (first, second)) == [False, True]

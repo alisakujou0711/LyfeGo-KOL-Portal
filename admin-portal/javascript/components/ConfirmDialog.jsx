@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ApiError } from '../lib/api'
+import { messageOr } from '../lib/api'
 
 // The "Are you sure?" pop-up (FS-ADM-OPP-004, -006, -008, -011, -012; to_ask.md
 // C6). There's no Figma design, so it's our choice: a centred white card over a
@@ -60,8 +60,7 @@ export default function ConfirmDialog({
       if (mounted.current) setState({ saving: false, error: '' })
     } catch (error) {
       if (!mounted.current) return
-      const known = error instanceof ApiError && error.status < 500
-      setState({ saving: false, error: known ? error.message : failedMessage })
+      setState({ saving: false, error: messageOr(error, failedMessage) })
     }
   }
 

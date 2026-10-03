@@ -10,11 +10,27 @@ export class ApiError extends Error {
   }
 }
 
-async function getJson(path) {
-  const response = await fetch(path, { headers: { Accept: 'application/json' } })
-  if (!response.ok) throw new ApiError(`GET ${path} failed`, response.status)
-  return response.json()
+// Calls the API and resolves its JSON. `body` is sent as JSON, or as it is when
+// it's a file. Rejects with an ApiError whose message is the API's `detail` (or
+// "<method> <path> failed" when it gave none), with any per-field `errors`.
+export async function request(method, path, body) {
+  const file = body instanceof Blob
+  const contentType = file ? body.type || 'application/octet-stream' : 'application/json'
+  const response = await fetch(path, {
+    method,
+    headers: {
+      Accept: 'application/json',
+      ...(body === undefined ? {} : { 'Content-Type': contentType }),
+    },
+    body: body === undefined || file ? body : JSON.stringify(body),
+  })
+  const json = await response.json().catch(() => ({}))
+  if (response.ok) return json
+  const message = typeof json.detail === 'string' ? json.detail : `${method} ${path} failed`
+  throw new ApiError(message, response.status, json.errors ?? {})
 }
+
+const getJson = (path) => request('GET', path)
 
 // Card summaries of the Opportunities Discover shows, soonest next Available
 // Session first:
@@ -66,14 +82,6 @@ export async function getOpportunity(id) {
 // so retries must reuse it. Rejects with an ApiError whose status is 409 when
 // the Session or Opportunity can no longer be applied for (`message` is
 // creator-readable), or 422 with per-field messages in `fieldErrors`.
-export async function submitApplication(application) {
-  const response = await fetch('/api/applications', {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(application),
-  })
-  const body = await response.json().catch(() => ({}))
-  if (response.ok) return body
-  const message = typeof body.detail === 'string' ? body.detail : 'POST /api/applications failed'
-  throw new ApiError(message, response.status, body.errors ?? {})
+export function submitApplication(application) {
+  return request('POST', '/api/applications', application)
 }

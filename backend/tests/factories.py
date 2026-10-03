@@ -3,6 +3,10 @@
 import json
 from datetime import datetime, timedelta
 
+# The tests' "now" (the `frozen_now` fixture), in naive Singapore Time as stored in the database.
+NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
+TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
+
 BARTER = {
     "Title": "Tennis Group Class",
     "PartnerBrandName": "Kallang Tennis Centre",
@@ -48,6 +52,15 @@ def _insert(conn, table, row):
 
 def add_opportunity(conn, base=BARTER, **columns):
     return _insert(conn, "Opportunity", {**base, **columns})
+
+
+def add_ready_opportunity(conn, *, session_at: datetime | None = None, **columns):
+    """An Opportunity that passes the Live checks: it has a deliverable, plus a Session at `session_at` if given."""
+    opportunity_id = add_opportunity(conn, **columns)
+    add_deliverable(conn, opportunity_id, "1 × Reel")
+    if session_at is not None:
+        add_session(conn, opportunity_id, session_at)
+    return opportunity_id
 
 
 def add_session(conn, opportunity_id, starts_at: datetime, *, slots=3, cancelled=False, recurrence_id=None):

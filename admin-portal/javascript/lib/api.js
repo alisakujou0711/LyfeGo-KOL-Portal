@@ -1,27 +1,30 @@
 // The only Admin Portal module that talks to the API (backend/, /api/admin/*).
 // Every Admin endpoint needs the HTTP-only session cookie that signing in sets;
 // the browser sends it by itself on same-origin requests.
-import { ApiError } from '../../../creator-portal/javascript/lib/api'
+import { ApiError, request as send } from '../../../creator-portal/javascript/lib/api'
 
 export { ApiError }
 
-// `body` is sent as JSON, or as it is when it's a file.
-async function send(method, path, body) {
-  const file = body instanceof Blob
-  const contentType = file ? body.type || 'application/octet-stream' : 'application/json'
-  const response = await fetch(path, {
-    method,
-    headers: {
-      Accept: 'application/json',
-      ...(body === undefined ? {} : { 'Content-Type': contentType }),
-    },
-    body: body === undefined || file ? body : JSON.stringify(body),
-  })
-  const json = await response.json().catch(() => ({}))
-  if (response.ok) return json
-  const message = typeof json.detail === 'string' ? json.detail : `${method} ${path} failed`
-  throw new ApiError(message, response.status, json.errors ?? {})
+// The API's message for a request it refused (a 4xx explains why), or
+// `fallback` for a server error or no connection (FS-ADM-ERR-001/002).
+export function messageOr(error, fallback) {
+  return error instanceof ApiError && error.status < 500 ? error.message : fallback
 }
+
+// A 422's per-field messages, or null for any other failure.
+export function fieldErrorsOf(error) {
+  const refused = error instanceof ApiError && error.status === 422 && Object.keys(error.fieldErrors).length > 0
+  return refused ? error.fieldErrors : null
+}
+
+// The choices the API takes, in the Figma's order.
+export const CATEGORIES = ['Sport', 'Lifestyle']
+export const COMPENSATION_TYPES = ['Barter', 'Paid']
+export const CURRENCIES = ['SGD', 'USD']
+export const PAYMENT_BASES = ['Per completed collaboration', 'Per post', 'Flat fee']
+export const COLLABORATION_TYPES = ['One-off', 'One-off or Ongoing', 'Ongoing']
+export const DELIVERABLE_TYPES = ['Fixed', 'Flexible']
+export const PUBLISHING_STATUSES = ['Draft', 'Live', 'Closed']
 
 // `path` with the non-empty `params` as its query string.
 function withQuery(path, params) {

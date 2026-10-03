@@ -11,6 +11,7 @@ import {
   compensationLabel,
   formatAmount,
   formatLongDate,
+  formatSessionLine,
   formatTimeRange,
   visibleExperienceLevels,
 } from '../javascript/lib/format'
@@ -412,7 +413,7 @@ function OpportunityDetail({ opportunity }) {
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-line px-4 py-3 z-50 animate-slide-up">
         {session && (
           <p className="text-xs text-brand font-medium mb-2 truncate">
-            {formatLongDate(session.date)} · {formatTimeRange(session)}
+            {formatSessionLine(session)}
           </p>
         )}
         {registerButton}

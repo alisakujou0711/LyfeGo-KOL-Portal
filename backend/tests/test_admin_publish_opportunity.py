@@ -1,21 +1,17 @@
 """Publishing and editing Live Opportunities from the Admin form (Admin ticket 05)."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
-from tests.factories import add_application, add_deliverable, add_opportunity, add_session
-from tests.test_admin_save_opportunity import EMPTY_FORM, FILLED_FORM, create, created, editing, form_of, save
-
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
+from tests.admin_api import (
+    EMPTY_FORM, FILLED_FORM, create, created, discover_ids, editing, form_of, resaved, save,
+)
+from tests.factories import NOW, TOMORROW_10AM, add_application, add_deliverable, add_opportunity, add_session
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def published_at(db, opportunity_id):
@@ -31,17 +27,6 @@ def snapshot(db):
     cursor.execute("SELECT SubmissionSnapshot FROM Application")
     [(stored,)] = cursor.fetchall()
     return json.loads(stored)
-
-
-def discover_ids(client):
-    return [card["id"] for card in client.get("/api/opportunities").json()]
-
-
-def resave(client, saved, **changes):
-    """Save `saved` (as the edit page loaded it) again with `changes`."""
-    response = save(client, saved["id"], {**form_of(saved), **changes, "version": saved["version"]})
-    assert response.status_code == 200, response.json()
-    return response.json()
 
 
 def test_publishing_an_empty_form_is_refused_with_every_missing_field(client, db, signed_in):
@@ -116,7 +101,7 @@ def test_a_draft_or_closed_save_skips_the_live_checks(client, db, signed_in):
     live = add_opportunity(db, AreaNeighbourhood="")  # no area, deliverable or Session
     loaded = editing(client, live)
 
-    resave(client, loaded, publishingStatus="Closed")
+    resaved(client, loaded, publishingStatus="Closed")
 
 
 def test_publishing_a_new_opportunity_makes_it_live_on_discover_at_once(client, db, signed_in):
@@ -133,10 +118,10 @@ def test_publishing_a_draft_sets_published_at_only_the_first_time_it_goes_live(c
     assert published_at(db, draft["id"]) is None
     at(NOW + timedelta(hours=1))
 
-    live = resave(client, draft, publishingStatus="Live")
+    live = resaved(client, draft, publishingStatus="Live")
     at(NOW + timedelta(hours=2))
-    closed = resave(client, live, publishingStatus="Closed")
-    resave(client, closed, publishingStatus="Live")
+    closed = resaved(client, live, publishingStatus="Closed")
+    resaved(client, closed, publishingStatus="Live")
 
     assert published_at(db, draft["id"]) == NOW + timedelta(hours=1)
     assert discover_ids(client) == [draft["id"]]
@@ -160,7 +145,7 @@ def test_an_existing_opportunity_publishes_with_its_stored_future_sessions(clien
     add_session(db, opp, TOMORROW_10AM)
     loaded = editing(client, opp)
 
-    resave(client, loaded, publishingStatus="Live")
+    resaved(client, loaded, publishingStatus="Live")
 
     assert discover_ids(client) == [str(opp)]
 
@@ -192,7 +177,7 @@ def test_edits_to_a_live_opportunity_reach_the_creator_portal_without_changing_s
     snapshot_before = snapshot(db)
     loaded = editing(client, opp)
 
-    resave(client, loaded, title="Tennis for Two", whatCreatorReceives="Two classes", publishingStatus="Live")
+    resaved(client, loaded, title="Tennis for Two", whatCreatorReceives="Two classes", publishingStatus="Live")
 
     [card] = client.get("/api/opportunities").json()
     assert card["title"] == "Tennis for Two"
@@ -210,7 +195,7 @@ def test_closing_takes_it_off_discover_and_keeps_its_sessions_and_applications(c
     add_application(db, opp, session, status="Accepted")
     loaded = editing(client, opp)
 
-    resave(client, loaded, publishingStatus=status)
+    resaved(client, loaded, publishingStatus=status)
 
     assert discover_ids(client) == []
     [row] = client.get("/api/admin/opportunities").json()["opportunities"]

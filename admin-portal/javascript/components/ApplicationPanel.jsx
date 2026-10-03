@@ -1,10 +1,11 @@
 import { useEffect, useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import FormField from '../../../creator-portal/javascript/components/FormField'
+import { CloseIcon } from '../../../creator-portal/javascript/components/Icons'
 import { formatDayMonthYear, formatPayment } from '../../../creator-portal/javascript/lib/format'
-import { stripHandle, validateRegistration } from '../../../creator-portal/javascript/lib/validation'
+import { contactPayload, validateRegistration } from '../../../creator-portal/javascript/lib/validation'
 import { useApiQuery } from '../hooks/useApiQuery'
-import { APPLICATION_STATUSES, ApiError, getApplication, updateApplication } from '../lib/api'
+import { APPLICATION_STATUSES, getApplication, messageOr, updateApplication } from '../lib/api'
 import { formatHandle, formatSessionLine } from '../lib/format'
 import { STATUS_STYLES, TagBadge } from './AdminBadges'
 import { LoadError } from './AdminControls'
@@ -15,16 +16,7 @@ const SAVED_MESSAGE_MS = 2500
 
 const SAVE_FAILED = "Couldn't save the changes. Check your connection and try again."
 
-// The API's message for a refused save, or ours when it gave none (FS-ADM-ERR-001/002).
-const failureMessage = (error) => (error instanceof ApiError && error.status < 500 ? error.message : SAVE_FAILED)
-
-function CloseIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  )
-}
+const failureMessage = (error) => messageOr(error, SAVE_FAILED)
 
 function CalendarIcon() {
   return (
@@ -229,17 +221,10 @@ function ContactEditor({ application, onSaved, onCancel }) {
     if (Object.keys(found).length > 0) return
     setSave({ saving: true, error: '' })
     try {
-      const contact = {
-        fullName: values.fullName.trim(),
-        instagram: stripHandle(values.instagram),
-        tiktok: stripHandle(values.tiktok),
-        email: values.email.trim(),
-        phone: values.phone.trim(),
-      }
-      onSaved(await updateApplication(application.id, { contact }))
+      onSaved(await updateApplication(application.id, { contact: contactPayload(values) }))
     } catch (error) {
       const fieldErrors = Object.fromEntries(
-        Object.entries(error instanceof ApiError ? error.fieldErrors : {})
+        Object.entries(error.fieldErrors ?? {})
           .filter(([key]) => key.startsWith('contact.'))
           .map(([key, message]) => [key.slice('contact.'.length), message]),
       )

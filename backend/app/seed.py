@@ -18,7 +18,7 @@ from datetime import date, datetime, time, timedelta
 from app.admins import add_admin
 from app.applications import historical_snapshot
 from app.config import Settings
-from app.db import connect
+from app.db import connect, insert
 from app.opportunities import SHORT_WEEKDAYS, get_detail
 from app.schedule import generated_times
 from create_lyfego_db import create_tables
@@ -456,18 +456,18 @@ def _seed_opportunity(conn, opportunity: dict, today: date) -> None:
     cursor = conn.cursor()
     nested = ("deliverables", "info", "sessions", "weekly")
     row = {"PublishingStatus": "Live", **{key: value for key, value in opportunity.items() if key not in nested}}
-    opp_id = _insert(cursor, "Opportunity", row)
+    opp_id = insert(cursor, "Opportunity", row)
     for item in opportunity["deliverables"]:
-        _insert(cursor, "DeliverableItems", {"OpportunityID": opp_id, "ItemDescription": item})
+        insert(cursor, "DeliverableItems", {"OpportunityID": opp_id, "ItemDescription": item})
     for label, value in opportunity["info"]:
-        _insert(cursor, "AdditionalInformation", {"OpportunityID": opp_id, "Label": label, "Value": value})
+        insert(cursor, "AdditionalInformation", {"OpportunityID": opp_id, "Label": label, "Value": value})
     day_zero = _first_after(today, SATURDAY)
     sessions = [{**session, "date": day_zero + timedelta(days=session["day"])}
                 for session in opportunity["sessions"]]
     for schedule in opportunity.get("weekly", []):
         sessions += _insert_schedule(cursor, opp_id, schedule, today)
     session_ids = [
-        _insert(cursor, "Session", {
+        insert(cursor, "Session", {
             "OpportunityID": opp_id,
             "SessionDate": session["date"],
             "StartTime": session["start"],
@@ -500,7 +500,7 @@ def _seed_opportunity(conn, opportunity: dict, today: date) -> None:
                 "phone": "+65 9123 4567",
                 "note": None,
             }
-            _insert(cursor, "Application", {
+            insert(cursor, "Application", {
                 "OpportunityID": opp_id,
                 "OriginalSessionID": session_id,
                 "CurrentSessionID": session_id,
@@ -524,7 +524,7 @@ def _insert_schedule(cursor, opp_id: int, schedule: dict, today: date) -> list[d
     """
     weekdays = sorted(schedule["weekdays"])
     first = min(_first_after(today, weekday) for weekday in weekdays)
-    recurrence_id = _insert(cursor, "RecurringSchedule", {
+    recurrence_id = insert(cursor, "RecurringSchedule", {
         "OpportunityID": opp_id,
         "StartDate": first,
         "EndDate": None,
@@ -545,10 +545,3 @@ def _insert_schedule(cursor, opp_id: int, schedule: dict, today: date) -> list[d
 def _first_after(today: date, weekday: int) -> date:
     """The first date after `today` falling on `weekday`; a week later when `today` is that weekday."""
     return today + timedelta(days=(weekday - today.weekday() - 1) % 7 + 1)
-
-
-def _insert(cursor, table: str, row: dict) -> int:
-    columns = ", ".join(row)
-    placeholders = ", ".join(["%s"] * len(row))
-    cursor.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", list(row.values()))
-    return cursor.lastrowid

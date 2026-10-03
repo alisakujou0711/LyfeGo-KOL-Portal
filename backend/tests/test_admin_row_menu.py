@@ -6,39 +6,23 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tests.factories import (PAID, add_application, add_deliverable, add_info, add_opportunity, add_schedule,
-                             add_session)
-from tests.test_admin_save_opportunity import editing
-
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
+from tests.admin_api import admin_row, discover_ids, editing
+from tests.factories import (
+    NOW, PAID, TOMORROW_10AM, add_application, add_deliverable, add_info, add_opportunity, add_ready_opportunity,
+    add_schedule, add_session,
+)
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def act(client, opportunity_id, action):
     return client.post(f"/api/admin/opportunities/{opportunity_id}/{action}")
 
 
-def discover_ids(client):
-    return [card["id"] for card in client.get("/api/opportunities").json()]
-
-
-def row(client, opportunity_id):
-    rows = client.get("/api/admin/opportunities").json()["opportunities"]
-    return next(r for r in rows if r["id"] == str(opportunity_id))
-
-
 def ready_draft(db, **columns):
-    """A Draft that passes the Live checks: a deliverable and a future Session."""
-    opp = add_opportunity(db, **{"PublishingStatus": "Draft", **columns})
-    add_deliverable(db, opp, "1 × Reel")
-    add_session(db, opp, TOMORROW_10AM)
-    return opp
+    """A Draft that passes the Live checks, with a future Session."""
+    return add_ready_opportunity(db, session_at=TOMORROW_10AM, **{"PublishingStatus": "Draft", **columns})
 
 
 def apply(client, opportunity_id, session_id, key):
@@ -70,7 +54,7 @@ def test_publish_makes_a_ready_draft_live_on_discover(client, db, signed_in):
     assert response.status_code == 200
     assert response.json()["publishingStatus"] == "Live"
     assert discover_ids(client) == [str(opp)]
-    assert row(client, opp)["lastUpdated"] == "2026-09-23"
+    assert admin_row(client, opp)["lastUpdated"] == "2026-09-23"
 
 
 def test_publish_refuses_a_draft_that_fails_the_live_checks_and_it_stays_a_draft(client, db, signed_in):
@@ -84,7 +68,7 @@ def test_publish_refuses_a_draft_that_fails_the_live_checks_and_it_stays_a_draft
         "sessions": "Add at least one future session",
         "area": "Area / neighbourhood is required",
     }
-    assert row(client, opp)["publishingStatus"] == "Draft"
+    assert admin_row(client, opp)["publishingStatus"] == "Draft"
     assert discover_ids(client) == []
 
 
@@ -101,7 +85,7 @@ def test_close_takes_it_off_discover_and_keeps_its_sessions_and_applications(cli
     assert response.status_code == 200
     assert response.json()["publishingStatus"] == "Closed"
     assert discover_ids(client) == []
-    assert row(client, opp)["applicationsCount"] == 2
+    assert admin_row(client, opp)["applicationsCount"] == 2
     assert editing(client, opp)["sessions"] == sessions_before
     statuses = [a["status"] for a in client.get("/api/admin/applications").json()["applications"]]
     assert sorted(statuses) == ["Accepted", "Reviewing"]
@@ -133,7 +117,7 @@ def test_an_action_for_another_status_is_refused_and_changes_nothing(client, db,
     assert response.json()["detail"] == (
         f"This opportunity is {status} now. Reload the page to see its current status."
     )
-    assert row(client, opp)["publishingStatus"] == status
+    assert admin_row(client, opp)["publishingStatus"] == status
 
 
 def test_close_moves_the_version_on_so_an_open_edit_page_cant_overwrite_it(client, db, signed_in):
@@ -147,7 +131,7 @@ def test_close_moves_the_version_on_so_an_open_edit_page_cant_overwrite_it(clien
     form = {key: value for key, value in loaded.items() if key != "id"}
     response = client.put(f"/api/admin/opportunities/{opp}", json=form)
     assert response.status_code == 409
-    assert row(client, opp)["publishingStatus"] == "Closed"
+    assert admin_row(client, opp)["publishingStatus"] == "Closed"
 
 
 def test_duplicate_creates_a_draft_with_the_same_fields_and_no_sessions_or_applications(client, db, signed_in):
@@ -170,8 +154,8 @@ def test_duplicate_creates_a_draft_with_the_same_fields_and_no_sessions_or_appli
     assert copy["recurring"] is None
     same = ("id", "version", "sessions", "publishingStatus")
     assert {k: v for k, v in copy.items() if k not in same} == {k: v for k, v in original.items() if k not in same}
-    assert row(client, copy["id"])["applicationsCount"] == 0
-    assert row(client, copy["id"])["schedule"] is None
+    assert admin_row(client, copy["id"])["applicationsCount"] == 0
+    assert admin_row(client, copy["id"])["schedule"] is None
     assert client.get(f"/api/opportunities/{copy['id']}").json()["payment"]["basis"] == "Flat fee"
     assert discover_ids(client) == [str(opp)]
 

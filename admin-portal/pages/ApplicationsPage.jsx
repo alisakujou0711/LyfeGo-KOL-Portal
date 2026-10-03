@@ -3,10 +3,10 @@ import { useSearchParams } from 'react-router-dom'
 import { formatDayMonthYear } from '../../creator-portal/javascript/lib/format'
 import { PageHeader } from '../javascript/components/AdminLayout'
 import { StatusBadge } from '../javascript/components/AdminBadges'
-import { FilterSelect, ListFooter, LoadError, MessageRow, SearchField } from '../javascript/components/AdminControls'
+import { FilterSelect, ListFooter, ListTable, LoadError, SearchField } from '../javascript/components/AdminControls'
 import ApplicationPanel from '../javascript/components/ApplicationPanel'
 import { useApiQuery } from '../javascript/hooks/useApiQuery'
-import { APPLICATION_STATUSES, listApplications } from '../javascript/lib/api'
+import { APPLICATION_STATUSES, CATEGORIES, listApplications } from '../javascript/lib/api'
 import { formatHandle, formatSessionLine } from '../javascript/lib/format'
 
 // "Clear all filters" resets these; the status has its own "View all", as in the Figma.
@@ -82,7 +82,7 @@ function FilterBar({ filters, opportunityId, status, options, onChange, onOpport
       <FilterSelect
         label="Category"
         all="All categories"
-        options={['Sport', 'Lifestyle']}
+        options={CATEGORIES}
         value={filters.category}
         onChange={(category) => onChange({ category })}
       />
@@ -189,43 +189,20 @@ export default function ApplicationsPage() {
             <LoadError message="Couldn't load applications. Check your connection." onRetry={reload} />
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" aria-busy={status === 'loading'}>
-                  <thead>
-                    <tr className="border-b border-line bg-surface-soft">
-                      {COLUMNS.map((column, index) => (
-                        <th
-                          key={column || index}
-                          scope="col"
-                          className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap first:pl-5"
-                        >
-                          {column || <span className="sr-only">Actions</span>}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line-faint">
-                    {list === null ? (
-                      <MessageRow columns={COLUMNS.length}>Loading applications…</MessageRow>
-                    ) : list.applications.length === 0 ? (
-                      <MessageRow columns={COLUMNS.length}>No applications match the current filters</MessageRow>
-                    ) : (
-                      list.applications.map((application) => (
-                        <ApplicationRow
-                          key={application.id}
-                          application={application}
-                          isOpen={open?.id === application.id}
-                          onToggle={() =>
-                            setOpen((current) =>
-                              current?.id === application.id ? null : { id: application.id, name: application.fullName },
-                            )
-                          }
-                        />
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <ListTable columns={COLUMNS} busy={status === 'loading'} rows={list?.applications ?? null} noun="applications">
+                {list?.applications.map((application) => (
+                  <ApplicationRow
+                    key={application.id}
+                    application={application}
+                    isOpen={open?.id === application.id}
+                    onToggle={() =>
+                      setOpen((current) =>
+                        current?.id === application.id ? null : { id: application.id, name: application.fullName },
+                      )
+                    }
+                  />
+                ))}
+              </ListTable>
               {list && (
                 <ListFooter
                   shown={list.applications.length}

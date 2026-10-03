@@ -6,14 +6,11 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from tests.factories import add_application, add_opportunity, add_schedule, add_session
-from tests.test_admin_save_opportunity import FILLED_FORM, create, created, editing, form_of, save
+from tests.admin_api import (
+    TUE_AND_SAT, create, created, editing, generated_session_id, resaved, stored_sessions, weekly_form,
+)
+from tests.factories import NOW, add_application, add_opportunity, add_schedule, add_session
 
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-
-TUE_AND_SAT = {"days": ["Tue", "Sat"], "start": "20:00", "end": "21:00",
-               "startDate": "2026-09-23", "endDate": "", "slots": "3"}
 
 # Eight weeks of Tuesdays and Saturdays after NOW: up to Wednesday 18 Nov.
 SATURDAYS = ["2026-09-26", "2026-10-03", "2026-10-10", "2026-10-17",
@@ -22,22 +19,7 @@ TUESDAYS = ["2026-09-29", "2026-10-06", "2026-10-13", "2026-10-20",
             "2026-10-27", "2026-11-03", "2026-11-10", "2026-11-17"]
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
-
-
-def weekly_form(recurring=TUE_AND_SAT, **changes):
-    """A form that passes the Live checks with a Recurring Schedule and no one-off Sessions."""
-    return {**FILLED_FORM, "scheduleType": "recurring", "recurring": recurring, "sessions": [],
-            "publishingStatus": "Live", **changes}
-
-
-def resave(client, loaded, **changes):
-    """Save `loaded` (as the edit page loaded it) with `changes`."""
-    response = save(client, loaded["id"], {**form_of(loaded), **changes, "version": loaded["version"]})
-    assert response.status_code == 200, response.json()
-    return response.json()
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def detail(client, opportunity_id):
@@ -50,26 +32,6 @@ def weekly_sessions(client, opportunity_id):
     """The listed Sessions of the Opportunity's only weekly class, as (date, start, slotsLeft)."""
     [weekly] = detail(client, opportunity_id)["weeklyClasses"]
     return [(s["date"], s["start"], s["slotsLeft"]) for s in weekly["sessions"]]
-
-
-def stored_sessions(db, opportunity_id):
-    """Every stored Session of the Opportunity as (date, start, slots, cancelled, generated)."""
-    db.commit()  # end the connection's snapshot so the API's commits are visible
-    cursor = db.cursor(dictionary=True)
-    cursor.execute("""SELECT SessionDate, StartTime, CreatorSlots, IsCancelled, RecurrenceID FROM Session
-                       WHERE OpportunityID = %s ORDER BY SessionDate, StartTime""", (opportunity_id,))
-    return [(row["SessionDate"].isoformat(), str(row["StartTime"])[:-3].zfill(5), row["CreatorSlots"],
-             bool(row["IsCancelled"]), row["RecurrenceID"] is not None) for row in cursor.fetchall()]
-
-
-def generated_session_id(db, opportunity_id, day: str):
-    db.commit()
-    cursor = db.cursor()
-    cursor.execute("""SELECT SessionID FROM Session
-                       WHERE OpportunityID = %s AND SessionDate = %s AND RecurrenceID IS NOT NULL""",
-                   (opportunity_id, day))
-    [(session_id,)] = cursor.fetchall()
-    return session_id
 
 
 def test_a_two_weekday_schedule_without_an_end_date_gets_eight_weeks_of_sessions_on_both_days(
@@ -167,7 +129,7 @@ def test_changing_the_time_regenerates_future_sessions_without_applications_only
     at(datetime(2026, 9, 27, 12, 0))  # Saturday 26 Sep has passed
     loaded = editing(client, saved["id"])
 
-    resave(client, loaded, recurring={**TUE_AND_SAT, "start": "19:00", "end": "20:00", "slots": "5"})
+    resaved(client, loaded, recurring={**TUE_AND_SAT, "start": "19:00", "end": "20:00", "slots": "5"})
 
     stored = stored_sessions(db, saved["id"])
     assert stored[0] == ("2026-09-26", "20:00", 3, False, True)  # past: never changed
@@ -186,7 +148,7 @@ def test_changing_the_weekdays_removes_the_dropped_days_sessions_without_applica
     add_application(db, saved["id"], applied, status="New")
     loaded = editing(client, saved["id"])
 
-    resave(client, loaded, recurring={**TUE_AND_SAT, "days": ["Sat"]})
+    resaved(client, loaded, recurring={**TUE_AND_SAT, "days": ["Sat"]})
 
     [weekly] = detail(client, saved["id"])["weeklyClasses"]
     assert weekly["days"] == ["Saturday"]
@@ -197,7 +159,7 @@ def test_saving_an_unchanged_schedule_keeps_every_session(client, db, signed_in)
     saved = created(client, weekly_form())
     before = [s["id"] for s in detail(client, saved["id"])["weeklyClasses"][0]["sessions"]]
 
-    resave(client, editing(client, saved["id"]))
+    resaved(client, editing(client, saved["id"]))
 
     assert [s["id"] for s in detail(client, saved["id"])["weeklyClasses"][0]["sessions"]] == before
 
@@ -208,7 +170,7 @@ def test_switching_to_specific_dates_keeps_sessions_with_applications_and_delete
     add_application(db, saved["id"], applied, status="Accepted")
     loaded = editing(client, saved["id"])
 
-    switched = resave(client, loaded, scheduleType="specific", sessions=[
+    switched = resaved(client, loaded, scheduleType="specific", sessions=[
         {"date": "2026-10-08", "start": "10:00", "end": "11:00", "slots": "4"}])
 
     assert (switched["scheduleType"], switched["recurring"]) == ("specific", None)
@@ -230,7 +192,7 @@ def test_switching_to_recurring_cancels_a_removed_one_off_session_with_applicati
     add_application(db, opp, applied, status="Reviewing")
     loaded = editing(client, opp)
 
-    switched = resave(client, loaded, scheduleType="recurring", recurring=TUE_AND_SAT, sessions=[])
+    switched = resaved(client, loaded, scheduleType="recurring", recurring=TUE_AND_SAT, sessions=[])
 
     stored = stored_sessions(db, opp)
     assert [(s["id"], s["cancelled"]) for s in switched["sessions"]] == [(str(applied), True)]
@@ -248,11 +210,11 @@ def test_a_weekly_class_and_a_one_off_session_both_survive_a_save(client, db, si
     loaded = editing(client, saved["id"])
     weekly_ids = [s["id"] for s in detail(client, saved["id"])["weeklyClasses"][0]["sessions"]]
 
-    resaved = resave(client, loaded)
+    saved_again = resaved(client, loaded)
 
-    assert resaved["scheduleType"] == "recurring"
-    assert resaved["recurring"]["days"] == ["Sat"]
-    assert [(s["id"], s["date"], s["start"]) for s in resaved["sessions"]] == [
+    assert saved_again["scheduleType"] == "recurring"
+    assert saved_again["recurring"]["days"] == ["Sat"]
+    assert [(s["id"], s["date"], s["start"]) for s in saved_again["sessions"]] == [
         (loaded["sessions"][0]["id"], "2026-09-29", "19:00")]
     body = detail(client, saved["id"])
     assert [s["id"] for s in body["weeklyClasses"][0]["sessions"]] == weekly_ids
@@ -273,7 +235,7 @@ def test_a_stored_one_off_session_on_a_new_weekly_date_is_kept_and_not_repeated(
         sessions=[{"date": "2026-09-29", "start": "20:00", "end": "21:00", "slots": "2"}]))
     loaded = editing(client, saved["id"])
 
-    resave(client, loaded, recurring=TUE_AND_SAT)
+    resaved(client, loaded, recurring=TUE_AND_SAT)
 
     body = detail(client, saved["id"])
     assert [(s["date"], s["slotsLeft"]) for s in body["sessions"]] == [("2026-09-29", 2)]
@@ -316,7 +278,7 @@ def test_switching_to_specific_dates_never_changes_past_sessions(client, db, sig
     at(datetime(2026, 9, 27, 12, 0))  # Saturday 26 Sep has passed
     loaded = editing(client, saved["id"])
 
-    resave(client, loaded, scheduleType="specific", sessions=[
+    resaved(client, loaded, scheduleType="specific", sessions=[
         {"date": "2026-10-08", "start": "10:00", "end": "11:00", "slots": "3"}])
 
     assert stored_sessions(db, saved["id"])[0] == ("2026-09-26", "20:00", 3, False, True)

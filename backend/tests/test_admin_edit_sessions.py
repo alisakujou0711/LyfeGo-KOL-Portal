@@ -5,24 +5,13 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tests.factories import add_application, add_deliverable, add_opportunity, add_schedule, add_session
-from tests.test_admin_save_opportunity import EMPTY_FORM, create, editing, form_of, save
-
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
+from tests.admin_api import EMPTY_FORM, create, discover_ids, editing, form_of, save
+from tests.factories import (
+    NOW, TOMORROW_10AM, add_application, add_ready_opportunity, add_schedule, add_session,
+)
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
-
-
-def live_opportunity(db):
-    """A Live Opportunity that passes the Live checks, with no Sessions yet."""
-    opp = add_opportunity(db)
-    add_deliverable(db, opp, "1 × Reel")
-    return opp
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def row(starts_at: datetime, *, hours=1, slots="3", session_id=None):
@@ -56,13 +45,9 @@ def detail_sessions(client, opportunity_id):
             for s in client.get(f"/api/opportunities/{opportunity_id}").json()["sessions"]]
 
 
-def discover_ids(client):
-    return [card["id"] for card in client.get("/api/opportunities").json()]
-
-
 def test_adding_changing_and_removing_sessions_on_a_live_opportunity_reaches_discover_and_detail(
         client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     moved = add_session(db, opp, TOMORROW_10AM)
     removed = add_session(db, opp, TOMORROW_10AM + timedelta(days=1))
     loaded = editing(client, opp)
@@ -84,7 +69,7 @@ def test_adding_changing_and_removing_sessions_on_a_live_opportunity_reaches_dis
 
 
 def test_removing_a_session_with_applications_cancels_it_and_keeps_them(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     kept = add_session(db, opp, TOMORROW_10AM)
     applied = add_session(db, opp, TOMORROW_10AM + timedelta(days=1))
     add_application(db, opp, applied, status="Declined")
@@ -101,7 +86,7 @@ def test_removing_a_session_with_applications_cancels_it_and_keeps_them(client, 
 
 
 def test_slots_below_the_accepted_count_are_refused_on_the_right_row(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     first = add_session(db, opp, TOMORROW_10AM)
     full = add_session(db, opp, TOMORROW_10AM + timedelta(days=1), slots=3)
     add_application(db, opp, full, status="Accepted")
@@ -124,7 +109,7 @@ def test_slots_below_the_accepted_count_are_refused_on_the_right_row(client, db,
 
 
 def test_raising_the_slots_of_a_filled_session_makes_it_available_again(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     full = add_session(db, opp, TOMORROW_10AM, slots=2)
     add_application(db, opp, full, status="Accepted")
     add_application(db, opp, full, status="Accepted")
@@ -139,7 +124,7 @@ def test_raising_the_slots_of_a_filled_session_makes_it_available_again(client, 
 
 
 def test_adding_a_session_to_a_live_opportunity_with_none_left_puts_it_back_on_discover(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     past = add_session(db, opp, NOW - timedelta(days=1))
     assert discover_ids(client) == []
     loaded = editing(client, opp)
@@ -152,7 +137,7 @@ def test_adding_a_session_to_a_live_opportunity_with_none_left_puts_it_back_on_d
 
 
 def test_an_exact_duplicate_session_is_refused_and_an_overlapping_one_is_accepted(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     existing = add_session(db, opp, TOMORROW_10AM)
     loaded = editing(client, opp)
 
@@ -179,7 +164,7 @@ def test_a_new_opportunitys_duplicate_session_is_refused(client, db, signed_in):
 
 
 def test_a_session_can_t_duplicate_one_of_the_weekly_classes(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     saturdays = add_schedule(db, opp, datetime(2026, 9, 26, 20, 0))
     add_session(db, opp, datetime(2026, 9, 26, 20, 0), recurrence_id=saturdays)
     loaded = editing(client, opp)
@@ -191,7 +176,7 @@ def test_a_session_can_t_duplicate_one_of_the_weekly_classes(client, db, signed_
 
 
 def test_a_cancelled_sessions_time_can_be_used_again(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     add_session(db, opp, TOMORROW_10AM, cancelled=True)
     loaded = editing(client, opp)
 
@@ -201,7 +186,7 @@ def test_a_cancelled_sessions_time_can_be_used_again(client, db, signed_in):
 
 
 def test_a_session_that_has_started_since_the_page_loaded_is_never_changed_by_a_save(client, db, signed_in, at):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     starting = add_session(db, opp, NOW + timedelta(hours=1))
     later = add_session(db, opp, TOMORROW_10AM)
     add_application(db, opp, starting, status="Accepted")
@@ -224,7 +209,7 @@ def test_a_session_that_has_started_since_the_page_loaded_is_never_changed_by_a_
 
 
 def test_a_past_session_is_never_returned_for_editing_or_changed_by_a_save(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     past = add_session(db, opp, NOW - timedelta(days=1))
     loaded = editing(client, opp)
 
@@ -237,7 +222,7 @@ def test_a_past_session_is_never_returned_for_editing_or_changed_by_a_save(clien
 
 
 def test_a_session_can_t_be_moved_into_the_past_or_added_there(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     accepted = add_session(db, opp, TOMORROW_10AM)
     add_application(db, opp, accepted, status="Accepted")
     loaded = editing(client, opp)
@@ -257,7 +242,7 @@ def test_a_session_can_t_be_moved_into_the_past_or_added_there(client, db, signe
 
 
 def test_the_same_session_listed_twice_is_refused(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     session = add_session(db, opp, TOMORROW_10AM)
     loaded = editing(client, opp)
 
@@ -269,8 +254,8 @@ def test_the_same_session_listed_twice_is_refused(client, db, signed_in):
 
 
 def test_a_session_from_another_opportunity_can_t_be_edited(client, db, signed_in):
-    opp = live_opportunity(db)
-    other = add_session(db, live_opportunity(db), TOMORROW_10AM)
+    opp = add_ready_opportunity(db)
+    other = add_session(db, add_ready_opportunity(db), TOMORROW_10AM)
     loaded = editing(client, opp)
 
     response = save_sessions(client, loaded, [row(TOMORROW_10AM, slots="9", session_id=other)], publishingStatus="Closed")
@@ -283,7 +268,7 @@ def test_a_session_from_another_opportunity_can_t_be_edited(client, db, signed_i
 
 
 def test_publishing_counts_the_sessions_the_form_keeps(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     only = add_session(db, opp, TOMORROW_10AM)
     loaded = editing(client, opp)
 
@@ -295,7 +280,7 @@ def test_publishing_counts_the_sessions_the_form_keeps(client, db, signed_in):
 
 
 def test_the_one_off_sessions_of_an_opportunity_with_weekly_classes_are_edited_too(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     saturdays = add_schedule(db, opp, datetime(2026, 9, 26, 20, 0))
     weekly = add_session(db, opp, datetime(2026, 9, 26, 20, 0), recurrence_id=saturdays)
     tuesday = add_session(db, opp, datetime(2026, 9, 29, 20, 0))

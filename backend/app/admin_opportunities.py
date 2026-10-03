@@ -32,11 +32,13 @@ from functools import partial
 
 from mysql.connector.abstracts import MySQLConnectionAbstract
 
-from app.applications import ID_RE, Conflict, Invalid
+from app.applications import ID_RE, Conflict, Invalid, NotFound, choose_one_of
+from app.db import insert, transaction, update
 from app.opportunities import (
-    SHORT_WEEKDAYS, experience_levels, payment_amount, schedule_weekdays, session_from_row, session_times,
+    ACCEPTED_COUNT, SHORT_WEEKDAYS, can_delete_draft, deliverables_and_info, experience_levels, hhmm,
+    lock_opportunity_sessions, payment_amount, schedule_weekdays, session_from_row, session_times,
 )
-from app.schedule import ENTER_SLOTS, SESSION_GONE, plan_schedule
+from app.schedule import ENTER_SLOTS, SESSION_GONE, form_schedule, plan_schedule
 
 CATEGORIES = ("Sport", "Lifestyle")
 COMPENSATION_TYPES = ("Barter", "Paid")
@@ -87,6 +89,7 @@ _CHOICES = {
 
 ITEM_LENGTH, LABEL_LENGTH, VALUE_LENGTH = 500, 255, 500
 
+NOT_FOUND = "Opportunity not found"
 STALE_VERSION = (
     "Someone else saved this opportunity after you opened it. "
     "Reload the page to see their changes, then make yours again."
@@ -136,40 +139,30 @@ _SLOTS_RE = re.compile(r"[0-9]+")
 _AMOUNT_RE = re.compile(r"[0-9]+(\.[0-9]{1,2})?")
 
 
-class NotFound(Exception):
-    """No Opportunity has that id."""
+def _require_id(opportunity_id: str) -> None:
+    """Raise NotFound unless `opportunity_id` could be an Opportunity's id."""
+    if not ID_RE.fullmatch(opportunity_id):
+        raise NotFound(NOT_FOUND)
 
 
 def get_for_editing(conn: MySQLConnectionAbstract, opportunity_id: str, *, now: datetime) -> dict:
     """Every form field of an Opportunity, its future one-off Sessions, its Recurring
     Schedule's settings and future Sessions (cancelled ones too, so they can be
     reopened) and its version token; raises NotFound."""
-    if not ID_RE.fullmatch(opportunity_id):
-        raise NotFound(opportunity_id)
+    _require_id(opportunity_id)
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM Opportunity WHERE OpportunityID = %s", (opportunity_id,))
     opp = cursor.fetchone()
     if opp is None:
         conn.commit()
-        raise NotFound(opportunity_id)
-    cursor.execute(
-        "SELECT ItemDescription FROM DeliverableItems WHERE OpportunityID = %s ORDER BY DeliverableItemID",
-        (opportunity_id,),
-    )
-    deliverables = [row["ItemDescription"] for row in cursor.fetchall()]
-    cursor.execute(
-        "SELECT Label, Value FROM AdditionalInformation WHERE OpportunityID = %s ORDER BY InfoID",
-        (opportunity_id,),
-    )
-    additional_info = [{"label": row["Label"], "value": row["Value"]} for row in cursor.fetchall()]
+        raise NotFound(NOT_FOUND)
+    deliverables, additional_info = deliverables_and_info(cursor, opportunity_id)
     cursor.execute(
         "SELECT * FROM RecurringSchedule WHERE OpportunityID = %s ORDER BY RecurrenceID", (opportunity_id,)
     )
     schedules = cursor.fetchall()
     cursor.execute(
-        """SELECT s.*,
-                  (SELECT COUNT(*) FROM Application a
-                    WHERE a.CurrentSessionID = s.SessionID AND a.Status = 'Accepted') AS AcceptedCount,
+        f"""SELECT s.*, {ACCEPTED_COUNT},
                   (SELECT COUNT(*) FROM Application a WHERE a.CurrentSessionID = s.SessionID) AS ApplicationsCount,
                   (SELECT COUNT(*) FROM Application a
                     WHERE a.CurrentSessionID = s.SessionID AND a.Status IN ('New', 'Reviewing')) AS UndecidedCount
@@ -212,9 +205,7 @@ def create_opportunity(conn: MySQLConnectionAbstract, body: dict, *, now: dateti
     field, a status other than Draft or Live or, when it asks for Live, a failed
     Live check. With `check`, only checks: stores nothing and returns None."""
     stamp = now.replace(microsecond=0)
-    conn.commit()  # end any earlier read, so the transaction below starts fresh
-    conn.start_transaction()
-    try:
+    with transaction(conn):
         cursor = conn.cursor()
         form = _validated(body, now=now, plan_schedule=partial(plan_schedule, cursor, None, now=now),
                           current_status=None)
@@ -224,17 +215,9 @@ def create_opportunity(conn: MySQLConnectionAbstract, body: dict, *, now: dateti
         columns = {**form["columns"], "CreatedAt": stamp, "UpdatedAt": stamp}
         if columns["PublishingStatus"] == "Live":
             columns["PublishedAt"] = stamp
-        cursor.execute(
-            f"INSERT INTO Opportunity ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})",
-            list(columns.values()),
-        )
-        opportunity_id = cursor.lastrowid
+        opportunity_id = insert(cursor, "Opportunity", columns)
         _store_rows(cursor, opportunity_id, form)
         form["schedule"].apply(cursor, opportunity_id)
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
     return str(opportunity_id)
 
 
@@ -251,13 +234,10 @@ def update_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, body:
     Sessions, and its Recurring Schedule regenerates its future Sessions without
     Applications (app.schedule); its Applications are kept.
     """
-    if not ID_RE.fullmatch(opportunity_id):
-        raise NotFound(opportunity_id)
-    conn.commit()  # end any earlier read, so the transaction below starts fresh
+    _require_id(opportunity_id)
     # READ COMMITTED: once the schedule module has locked the Sessions, its
     # Accepted Counts see every accept committed before, however long that took.
-    conn.start_transaction(isolation_level="READ COMMITTED")
-    try:
+    with transaction(conn, isolation_level="READ COMMITTED"):
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             "SELECT PublishingStatus, UpdatedAt, PublishedAt FROM Opportunity WHERE OpportunityID = %s FOR UPDATE",
@@ -265,7 +245,7 @@ def update_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, body:
         )
         row = cursor.fetchone()
         if row is None:
-            raise NotFound(opportunity_id)
+            raise NotFound(NOT_FOUND)
         if body.get("version") != _version(row["UpdatedAt"]):
             raise Conflict(STALE_VERSION)
         form = _validated(body, now=now,
@@ -278,18 +258,11 @@ def update_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, body:
         columns = {**form["columns"], "UpdatedAt": stamp}
         if columns["PublishingStatus"] == "Live" and row["PublishedAt"] is None:
             columns["PublishedAt"] = stamp
-        cursor.execute(
-            f"UPDATE Opportunity SET {', '.join(f'{column} = %s' for column in columns)} WHERE OpportunityID = %s",
-            [*columns.values(), opportunity_id],
-        )
+        update(cursor, "Opportunity", columns, where="OpportunityID", key=opportunity_id)
         cursor.execute("DELETE FROM DeliverableItems WHERE OpportunityID = %s", (opportunity_id,))
         cursor.execute("DELETE FROM AdditionalInformation WHERE OpportunityID = %s", (opportunity_id,))
         _store_rows(cursor, opportunity_id, form)
         form["schedule"].apply(cursor, opportunity_id)
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
 
 
 def publish_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, *, now: datetime,
@@ -316,11 +289,8 @@ def delete_draft(conn: MySQLConnectionAbstract, opportunity_id: str) -> None:
     """Delete a Draft that has never been Live and has no Applications, with its
     Sessions, Recurring Schedule, Deliverable Items and Additional Information
     (FS-ADM-OPP-013). Raises NotFound, or Conflict for any other Opportunity."""
-    if not ID_RE.fullmatch(opportunity_id):
-        raise NotFound(opportunity_id)
-    conn.commit()  # end any earlier read, so the transaction below starts fresh
-    conn.start_transaction()
-    try:
+    _require_id(opportunity_id)
+    with transaction(conn):
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             "SELECT PublishingStatus, PublishedAt FROM Opportunity WHERE OpportunityID = %s FOR UPDATE",
@@ -328,20 +298,15 @@ def delete_draft(conn: MySQLConnectionAbstract, opportunity_id: str) -> None:
         )
         row = cursor.fetchone()
         if row is None:
-            raise NotFound(opportunity_id)
+            raise NotFound(NOT_FOUND)
         # Lock its Sessions, so an Application being submitted for one finishes first.
-        cursor.execute("SELECT SessionID FROM Session WHERE OpportunityID = %s FOR UPDATE", (opportunity_id,))
-        cursor.fetchall()
+        lock_opportunity_sessions(cursor, opportunity_id)
         cursor.execute("SELECT COUNT(*) AS applications FROM Application WHERE OpportunityID = %s", (opportunity_id,))
         applications = cursor.fetchone()["applications"]
-        if row["PublishingStatus"] != "Draft" or row["PublishedAt"] is not None or applications:
+        if not can_delete_draft(row["PublishingStatus"], row["PublishedAt"], applications):
             raise Conflict(CANT_DELETE)
         # Its Sessions, Recurring Schedule and rows go with it (ON DELETE CASCADE).
         cursor.execute("DELETE FROM Opportunity WHERE OpportunityID = %s", (opportunity_id,))
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
 
 
 def duplicate_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, *, now: datetime) -> str:
@@ -349,26 +314,18 @@ def duplicate_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, *,
     Additional Information and Recurring Schedule, which generates its Sessions
     as a save does. It copies no one-off Sessions, Applications or timestamps
     (FS-ADM-OPP-014). Returns the copy's id; raises NotFound."""
-    if not ID_RE.fullmatch(opportunity_id):
-        raise NotFound(opportunity_id)
+    _require_id(opportunity_id)
     stamp = now.replace(microsecond=0)
-    conn.commit()  # end any earlier read, so the transaction below starts fresh
-    conn.start_transaction()
-    try:
+    with transaction(conn):
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM Opportunity WHERE OpportunityID = %s", (opportunity_id,))
         opp = cursor.fetchone()
         if opp is None:
-            raise NotFound(opportunity_id)
-        columns = {
+            raise NotFound(NOT_FOUND)
+        copy_id = insert(cursor, "Opportunity", {
             **{column: value for column, value in opp.items() if column not in ("OpportunityID", "PublishedAt")},
             "PublishingStatus": "Draft", "CreatedAt": stamp, "UpdatedAt": stamp,
-        }
-        cursor.execute(
-            f"INSERT INTO Opportunity ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})",
-            list(columns.values()),
-        )
-        copy_id = cursor.lastrowid
+        })
         cursor.execute(
             """INSERT INTO DeliverableItems (OpportunityID, ItemDescription)
                SELECT %s, ItemDescription FROM DeliverableItems WHERE OpportunityID = %s ORDER BY DeliverableItemID""",
@@ -379,19 +336,11 @@ def duplicate_opportunity(conn: MySQLConnectionAbstract, opportunity_id: str, *,
                SELECT %s, Label, Value FROM AdditionalInformation WHERE OpportunityID = %s ORDER BY InfoID""",
             (copy_id, opportunity_id),
         )
-        # The form's Recurring Schedule: the Opportunity's first.
-        cursor.execute(
-            "SELECT * FROM RecurringSchedule WHERE OpportunityID = %s ORDER BY RecurrenceID LIMIT 1", (opportunity_id,)
-        )
-        schedule = cursor.fetchone()
+        schedule = form_schedule(cursor, opportunity_id)
         recurring = None if schedule is None else {
             **_recurring_settings(schedule), "startDate": schedule["StartDate"], "endDate": schedule["EndDate"],
         }
         plan_schedule(cursor, None, [], recurring, {}, now=now).apply(cursor, copy_id)
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
     return str(copy_id)
 
 
@@ -400,11 +349,8 @@ def _change_status(conn: MySQLConnectionAbstract, opportunity_id: str, current: 
     """Move an Opportunity from Publishing Status `current` to `new`, as a save
     does: its version moves on. Raises NotFound, or Conflict when it isn't
     `current` (e.g. another Admin changed it since the list was loaded)."""
-    if not ID_RE.fullmatch(opportunity_id):
-        raise NotFound(opportunity_id)
-    conn.commit()  # end any earlier read, so the transaction below starts fresh
-    conn.start_transaction()
-    try:
+    _require_id(opportunity_id)
+    with transaction(conn):
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             "SELECT PublishingStatus, UpdatedAt FROM Opportunity WHERE OpportunityID = %s FOR UPDATE",
@@ -412,21 +358,14 @@ def _change_status(conn: MySQLConnectionAbstract, opportunity_id: str, current: 
         )
         row = cursor.fetchone()
         if row is None:
-            raise NotFound(opportunity_id)
+            raise NotFound(NOT_FOUND)
         if row["PublishingStatus"] != current:
             raise Conflict(STATUS_CHANGED.format(status=row["PublishingStatus"]))
         # Wait for any Application being submitted for its Sessions to finish, as
         # submitting locks the Session; one submitted after this commits sees the change.
-        cursor.execute("SELECT SessionID FROM Session WHERE OpportunityID = %s FOR UPDATE", (opportunity_id,))
-        cursor.fetchall()
-        cursor.execute(
-            "UPDATE Opportunity SET PublishingStatus = %s, UpdatedAt = %s WHERE OpportunityID = %s",
-            (new, _next_stamp(row["UpdatedAt"], now), opportunity_id),
-        )
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
+        lock_opportunity_sessions(cursor, opportunity_id)
+        update(cursor, "Opportunity", {"PublishingStatus": new, "UpdatedAt": _next_stamp(row["UpdatedAt"], now)},
+               where="OpportunityID", key=opportunity_id)
 
 
 def _next_stamp(updated_at: datetime, now: datetime) -> datetime:
@@ -458,12 +397,10 @@ def _form_session(row: dict) -> dict:
 
 
 def _recurring_settings(schedule: dict) -> dict:
-    days = [WEEKDAYS[weekday] for weekday in schedule_weekdays(schedule)]
-    times = session_times({**schedule, "SessionDate": schedule["StartDate"]})
     return {
-        "days": days,
-        "start": times["start"],
-        "end": times["end"],
+        "days": [WEEKDAYS[weekday] for weekday in schedule_weekdays(schedule)],
+        "start": hhmm(schedule["StartTime"]),
+        "end": hhmm(schedule["EndTime"]),
         "startDate": schedule["StartDate"].isoformat(),
         "endDate": schedule["EndDate"].isoformat() if schedule["EndDate"] else None,
         "slots": schedule["DefaultCreatorSlots"],
@@ -528,7 +465,7 @@ def _validated(body: dict, *, now: datetime, plan_schedule, current_status: str 
     for field, (column, options) in _CHOICES.items():
         value = body.get(field)
         if value not in options:
-            errors[field] = f"Choose {', '.join(options[:-1])} or {options[-1]}"
+            errors[field] = choose_one_of(options)
         columns[column] = value
     # The form keeps the Payment while Barter is chosen, but hides it: then a value
     # that isn't valid is dropped rather than refused.
@@ -778,7 +715,7 @@ def _payment_basis(value, errors: dict) -> str | None:
     if value in (None, ""):
         return None
     if value not in PAYMENT_BASES:
-        errors["paymentBasis"] = f"Choose {', '.join(PAYMENT_BASES[:-1])} or {PAYMENT_BASES[-1]}"
+        errors["paymentBasis"] = choose_one_of(PAYMENT_BASES)
         return None
     return value
 
@@ -791,7 +728,7 @@ def _levels(value, errors: dict) -> str:
         errors["experienceLevels"] = "Choose at least one level"
         return ""
     if any(not isinstance(level, str) or level not in EXPERIENCE_LEVELS for level in value):
-        errors["experienceLevels"] = f"Choose {', '.join(EXPERIENCE_LEVELS[:-1])} or {EXPERIENCE_LEVELS[-1]}"
+        errors["experienceLevels"] = choose_one_of(EXPERIENCE_LEVELS)
         return ""
     if len(set(value)) > 1 and set(value) & set(LEVELS_ON_THEIR_OWN):
         errors["experienceLevels"] = "All Levels and Not Applicable can't be combined with other levels"

@@ -1,8 +1,8 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { jsonResponse, renderRoute } from '../../creator-portal/javascript/test/renderRoute'
+import { ADMIN } from '../javascript/test/adminFixtures'
 
-const ADMIN = { email: 'staff@lyfego.test', name: 'Staff Member' }
 const NOT_SIGNED_IN = jsonResponse({ detail: 'Sign in as an Admin to continue.' }, 401)
 const EMPTY_LIST = { counts: { total: 0, live: 0, draft: 0, closed: 0, applications: 0 }, opportunities: [] }
 

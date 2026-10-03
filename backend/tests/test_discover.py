@@ -2,16 +2,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tests.factories import PAID, add_application, add_opportunity, add_schedule, add_session
-
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
+from tests.factories import (
+    NOW, PAID, TOMORROW_10AM, add_application, add_opportunity, add_schedule, add_session,
+)
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def discover(client):

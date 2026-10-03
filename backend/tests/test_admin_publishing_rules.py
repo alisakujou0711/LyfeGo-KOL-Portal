@@ -5,12 +5,11 @@ from datetime import datetime
 
 import pytest
 
-from tests.factories import add_application, add_deliverable, add_info, add_opportunity, add_schedule, add_session
-from tests.test_admin_save_opportunity import EMPTY_FORM, FILLED_FORM, create, editing, form_of, save
+from tests.admin_api import EMPTY_FORM, FILLED_FORM, admin_row, create, discover_ids, editing, form_of, save
+from tests.factories import (
+    TOMORROW_10AM, add_application, add_ready_opportunity, add_deliverable, add_info, add_opportunity, add_schedule, add_session,
+)
 
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
 
 LIVE_TO_DRAFT = "A Live opportunity can't go back to Draft"
 CLOSED_TO_DRAFT = "A Closed opportunity can only be reopened to Live"
@@ -19,26 +18,12 @@ NEW_AS_CLOSED = "A new opportunity can only be saved as Draft or Live"
 CANT_DELETE = "Only a Draft that has never been Live or had an application can be deleted. Close it instead."
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def ready(db, **columns):
-    """An Opportunity that passes the Live checks: a deliverable and a future Session."""
-    opp = add_opportunity(db, **columns)
-    add_deliverable(db, opp, "1 × Reel")
-    add_session(db, opp, TOMORROW_10AM)
-    return opp
-
-
-def row(client, opportunity_id):
-    rows = client.get("/api/admin/opportunities").json()["opportunities"]
-    return next((r for r in rows if r["id"] == str(opportunity_id)), None)
-
-
-def discover_ids(client):
-    return [card["id"] for card in client.get("/api/opportunities").json()]
+    """An Opportunity that passes the Live checks, with a future Session."""
+    return add_ready_opportunity(db, session_at=TOMORROW_10AM, **columns)
 
 
 def resave_as(client, opportunity_id, status, *, check=False):
@@ -130,14 +115,14 @@ def test_reopening_runs_the_live_checks_and_a_failing_one_keeps_it_closed(client
         "sessions": "Add at least one future session",
         "area": "Area / neighbourhood is required",
     }
-    assert row(client, opp)["publishingStatus"] == "Closed"
+    assert admin_row(client, opp)["publishingStatus"] == "Closed"
 
 
 def test_reopening_as_draft_is_gone(client, db, signed_in):
     opp = ready(db, PublishingStatus="Closed")
 
     assert client.post(f"/api/admin/opportunities/{opp}/reopen").status_code == 404
-    assert row(client, opp)["publishingStatus"] == "Closed"
+    assert admin_row(client, opp)["publishingStatus"] == "Closed"
 
 
 # The check-only save the pop-ups run before asking

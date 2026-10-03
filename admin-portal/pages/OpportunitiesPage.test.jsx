@@ -1,8 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderRoute } from '../../creator-portal/javascript/test/renderRoute'
-
-const ADMIN = { email: 'staff@lyfego.test', name: 'Staff Member' }
+import { ADMIN, bodyRows } from '../javascript/test/adminFixtures'
 
 function row(overrides) {
   return {
@@ -126,11 +125,6 @@ function renderList(rows) {
 async function rowFor(title) {
   const cell = await screen.findByText(title, { selector: 'td *' })
   return cell.closest('tr')
-}
-
-function bodyRows() {
-  const [, body] = screen.getAllByRole('rowgroup')
-  return within(body).getAllByRole('row')
 }
 
 describe('Admin Opportunities list', () => {

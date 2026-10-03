@@ -15,13 +15,16 @@ from app.availability import (
     SessionState,
     evaluate_availability,
 )
-from app.db import contains_pattern
+from app.db import contains_pattern, placeholders
 
-_SESSIONS_WITH_ACCEPTED_COUNT = """
+# A Session's Accepted Count, for a query on `Session s`: only Accepted
+# Applications consume Creator Slots (ADR-0002).
+ACCEPTED_COUNT = """(SELECT COUNT(*) FROM Application a
+                      WHERE a.CurrentSessionID = s.SessionID AND a.Status = 'Accepted') AS AcceptedCount"""
+
+_SESSIONS_WITH_ACCEPTED_COUNT = f"""
     SELECT s.SessionID, s.OpportunityID, s.SessionDate, s.StartTime, s.EndTime,
-           s.CreatorSlots, s.IsCancelled, s.RecurrenceID,
-           (SELECT COUNT(*) FROM Application a
-             WHERE a.CurrentSessionID = s.SessionID AND a.Status = 'Accepted') AS AcceptedCount
+           s.CreatorSlots, s.IsCancelled, s.RecurrenceID, {ACCEPTED_COUNT}
       FROM Session s
       JOIN Opportunity o ON o.OpportunityID = s.OpportunityID
 """
@@ -82,7 +85,7 @@ def get_detail(
     statuses = ("Live", "Closed", "Draft") if include_draft else ("Live", "Closed")
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
-        f"SELECT * FROM Opportunity WHERE OpportunityID = %s AND PublishingStatus IN ({', '.join(['%s'] * len(statuses))})",
+        f"SELECT * FROM Opportunity WHERE OpportunityID = %s AND PublishingStatus IN ({placeholders(statuses)})",
         (opportunity_id, *statuses),
     )
     opp = cursor.fetchone()
@@ -90,16 +93,7 @@ def get_detail(
         return None
     cursor.execute(_SESSIONS_WITH_ACCEPTED_COUNT + " WHERE s.OpportunityID = %s", (opportunity_id,))
     rows = {row["SessionID"]: row for row in cursor.fetchall()}
-    cursor.execute(
-        "SELECT ItemDescription FROM DeliverableItems WHERE OpportunityID = %s ORDER BY DeliverableItemID",
-        (opportunity_id,),
-    )
-    deliverables = [row["ItemDescription"] for row in cursor.fetchall()]
-    cursor.execute(
-        "SELECT Label, Value FROM AdditionalInformation WHERE OpportunityID = %s ORDER BY InfoID",
-        (opportunity_id,),
-    )
-    additional_info = [{"label": row["Label"], "value": row["Value"]} for row in cursor.fetchall()]
+    deliverables, additional_info = deliverables_and_info(cursor, opportunity_id)
     cursor.execute("SELECT * FROM RecurringSchedule WHERE OpportunityID = %s", (opportunity_id,))
     schedules = {row["RecurrenceID"]: row for row in cursor.fetchall()}
 
@@ -171,11 +165,10 @@ def list_for_admin(
     ids = [opp["OpportunityID"] for opp in opportunities]
     sessions_by_opportunity, schedules = defaultdict(list), {}
     if ids:
-        placeholders = ", ".join(["%s"] * len(ids))
-        cursor.execute(_SESSIONS_WITH_ACCEPTED_COUNT + f" WHERE s.OpportunityID IN ({placeholders})", ids)
+        cursor.execute(_SESSIONS_WITH_ACCEPTED_COUNT + f" WHERE s.OpportunityID IN ({placeholders(ids)})", ids)
         for row in cursor.fetchall():
             sessions_by_opportunity[row["OpportunityID"]].append(row)
-        cursor.execute(f"SELECT * FROM RecurringSchedule WHERE OpportunityID IN ({placeholders})", ids)
+        cursor.execute(f"SELECT * FROM RecurringSchedule WHERE OpportunityID IN ({placeholders(ids)})", ids)
         schedules = {row["RecurrenceID"]: row for row in cursor.fetchall()}
 
     listed = []
@@ -196,12 +189,42 @@ def list_for_admin(
             # Derived, not a Publishing Status: a Live row that isn't `open` has no
             # Available Session left (FS-ADM-SES-020, LST-004).
             "availability": availability.state.value,
-            # Delete Draft: only a Draft that has never been Live or had an Application (FS-ADM-OPP-013).
-            "canDelete": opp["PublishingStatus"] == "Draft" and opp["PublishedAt"] is None
-                         and not opp["ApplicationsCount"],
+            "canDelete": can_delete_draft(opp["PublishingStatus"], opp["PublishedAt"], opp["ApplicationsCount"]),
             "lastUpdated": opp["UpdatedAt"].date().isoformat(),
         })
     return {"counts": counts, "opportunities": listed}
+
+
+def can_delete_draft(status: str, published_at: datetime | None, applications_count: int) -> bool:
+    """Delete Draft: only a Draft that has never been Live or had an Application (FS-ADM-OPP-013)."""
+    return status == "Draft" and published_at is None and not applications_count
+
+
+def deliverables_and_info(cursor, opportunity_id) -> tuple[list[str], list[dict]]:
+    """The Opportunity's Deliverable Items and Additional Information rows, in the order they were added."""
+    cursor.execute(
+        "SELECT ItemDescription FROM DeliverableItems WHERE OpportunityID = %s ORDER BY DeliverableItemID",
+        (opportunity_id,),
+    )
+    deliverables = [row["ItemDescription"] for row in cursor.fetchall()]
+    cursor.execute(
+        "SELECT Label, Value FROM AdditionalInformation WHERE OpportunityID = %s ORDER BY InfoID",
+        (opportunity_id,),
+    )
+    return deliverables, [{"label": row["Label"], "value": row["Value"]} for row in cursor.fetchall()]
+
+
+def lock_session(cursor, session_id) -> None:
+    """Lock a Session's row until the transaction ends."""
+    cursor.execute("SELECT SessionID FROM Session WHERE SessionID = %s FOR UPDATE", (session_id,))
+    cursor.fetchall()
+
+
+def lock_opportunity_sessions(cursor, opportunity_id) -> None:
+    """Lock every Session of the Opportunity until the transaction ends, so no
+    Application can be submitted for or accepted into one meanwhile."""
+    cursor.execute("SELECT SessionID FROM Session WHERE OpportunityID = %s FOR UPDATE", (opportunity_id,))
+    cursor.fetchall()
 
 
 def listed_sessions(detail: dict) -> list[dict]:
@@ -243,8 +266,8 @@ def _weekly_class(schedule: dict) -> dict:
     """A Recurring Schedule's weekdays in full, Monday first, e.g. ["Tuesday", "Saturday"] (to_ask.md D5)."""
     return {
         "days": [_WEEKDAYS[weekday] for weekday in schedule_weekdays(schedule)],
-        "start": _hhmm(schedule["StartTime"]),
-        "end": _hhmm(schedule["EndTime"]),
+        "start": hhmm(schedule["StartTime"]),
+        "end": hhmm(schedule["EndTime"]),
     }
 
 
@@ -344,12 +367,12 @@ def session_from_row(row: dict) -> Session:
 def session_times(row: dict) -> dict:
     return {
         "date": row["SessionDate"].isoformat(),
-        "start": _hhmm(row["StartTime"]),
-        "end": _hhmm(row["EndTime"]),
+        "start": hhmm(row["StartTime"]),
+        "end": hhmm(row["EndTime"]),
     }
 
 
-def _hhmm(time_of_day: timedelta) -> str:
+def hhmm(time_of_day: timedelta) -> str:
     """mysql-connector returns TIME columns as timedeltas since midnight."""
     minutes = int(time_of_day.total_seconds()) // 60
     return f"{minutes // 60:02d}:{minutes % 60:02d}"

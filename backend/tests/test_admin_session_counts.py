@@ -6,44 +6,26 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tests.factories import add_application, add_deliverable, add_opportunity, add_session
-from tests.test_admin_recurring_schedules import generated_session_id, stored_sessions, weekly_form
-from tests.test_admin_save_opportunity import created, editing, form_of, save
+from tests.admin_api import (
+    created, discover_ids, editing, generated_session_id, resave, resaved, stored_sessions, weekly_form,
+)
+from tests.factories import (
+    NOW, TOMORROW_10AM, add_application, add_deliverable, add_opportunity, add_ready_opportunity,
+    add_session,
+)
 
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
 
 # Saturdays 8-9pm up to 10 Oct: 26 Sep, 3 Oct and 10 Oct.
 SATURDAYS = {"days": ["Sat"], "start": "20:00", "end": "21:00",
              "startDate": "2026-09-23", "endDate": "2026-10-10", "slots": "3"}
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
-
-
-def live_opportunity(db):
-    """A Live Opportunity that passes the Live checks, with no Sessions yet."""
-    opp = add_opportunity(db)
-    add_deliverable(db, opp, "1 × Reel")
-    return opp
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def weekly_class(client):
     """A Live Opportunity with the SATURDAYS weekly class, as the edit page loads it."""
     return editing(client, created(client, weekly_form(SATURDAYS))["id"])
-
-
-def resave(client, loaded, **changes):
-    return save(client, loaded["id"], {**form_of(loaded), **changes, "version": loaded["version"]})
-
-
-def resaved(client, loaded, **changes):
-    response = resave(client, loaded, **changes)
-    assert response.status_code == 200, response.json()
-    return response.json()
 
 
 def weekly_changed(loaded, day, **change):
@@ -68,10 +50,6 @@ def detail_dates(client, opportunity_id):
     return sorted(s["date"] for s in listed if s["status"] == "available")
 
 
-def discover_ids(client):
-    return [card["id"] for card in client.get("/api/opportunities").json()]
-
-
 def listed_availability(client, opportunity_id):
     rows = client.get("/api/admin/opportunities").json()["opportunities"]
     [row] = [row for row in rows if row["id"] == str(opportunity_id)]
@@ -81,7 +59,7 @@ def listed_availability(client, opportunity_id):
 # Counts (FS-ADM-SES-023, LST-006)
 
 def test_each_one_off_session_shows_accepted_slots_and_application_counts(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     full = add_session(db, opp, TOMORROW_10AM, slots=2)
     other = add_session(db, opp, TOMORROW_10AM + timedelta(days=1), slots=3)
     for status in ("Accepted", "Accepted", "New", "Reviewing", "Declined"):
@@ -152,7 +130,7 @@ def test_a_weekly_sessions_slots_cant_go_below_its_accepted_count(client, db, si
 
 
 def test_raising_a_full_sessions_slots_makes_it_available_on_discover_again(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     full = add_session(db, opp, TOMORROW_10AM, slots=1)
     add_application(db, opp, full, status="Accepted")
     assert str(opp) not in discover_ids(client)
@@ -259,7 +237,7 @@ def test_reopening_is_refused_unless_the_opportunity_is_live(client, db, signed_
 
 
 def test_reopening_is_refused_when_another_session_has_its_date_and_time(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     cancelled = add_session(db, opp, TOMORROW_10AM, cancelled=True)
     add_application(db, opp, cancelled, status="New")
     add_session(db, opp, TOMORROW_10AM)  # its date and time used again (to_ask.md D10)
@@ -314,7 +292,7 @@ def test_a_session_that_has_started_cant_be_cancelled_or_reopened(client, db, si
 
 
 def test_a_one_off_sessions_remove_works_as_before(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     kept = add_session(db, opp, TOMORROW_10AM)
     applied = add_session(db, opp, TOMORROW_10AM + timedelta(days=1))
     add_application(db, opp, applied, status="Declined")
@@ -346,7 +324,7 @@ def test_switching_to_specific_dates_keeps_cancelled_weekly_sessions_with_applic
 # "No available sessions" on the Opportunities list (FS-ADM-SES-020, -021, LST-004)
 
 def test_a_live_opportunity_with_no_available_session_says_so_until_a_future_session_is_added(client, db, signed_in):
-    opp = live_opportunity(db)
+    opp = add_ready_opportunity(db)
     full = add_session(db, opp, TOMORROW_10AM, slots=1)
     add_application(db, opp, full, status="Accepted")
     add_session(db, opp, NOW - timedelta(days=1))
@@ -363,7 +341,7 @@ def test_a_live_opportunity_with_no_available_session_says_so_until_a_future_ses
 
 
 def test_each_listed_opportunity_carries_its_derived_availability(client, db, signed_in):
-    past_only = live_opportunity(db)
+    past_only = add_ready_opportunity(db)
     add_session(db, past_only, NOW - timedelta(days=1))
     draft = add_opportunity(db, PublishingStatus="Draft")
     add_session(db, draft, TOMORROW_10AM)

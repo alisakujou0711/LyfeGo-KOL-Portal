@@ -3,17 +3,19 @@ import { Link, useNavigate } from 'react-router-dom'
 import { formatDayMonthYear, formatPayment, formatSchedule } from '../../creator-portal/javascript/lib/format'
 import { PageHeader } from '../javascript/components/AdminLayout'
 import { StatusBadge, TagBadge } from '../javascript/components/AdminBadges'
-import { FilterSelect, ListFooter, LoadError, MessageRow, SearchField } from '../javascript/components/AdminControls'
+import { FilterSelect, ListFooter, ListTable, LoadError, SearchField } from '../javascript/components/AdminControls'
 import ConfirmDialog from '../javascript/components/ConfirmDialog'
 import { CONFIRM_CLOSE, CONFIRM_PUBLISH } from '../javascript/components/OpportunityForm'
 import RowMenu from '../javascript/components/RowMenu'
 import { useApiQuery } from '../javascript/hooks/useApiQuery'
 import {
-  ApiError,
+  CATEGORIES,
   closeOpportunity,
   deleteOpportunity,
   duplicateOpportunity,
+  fieldErrorsOf,
   listOpportunities,
+  messageOr,
   publishOpportunity,
 } from '../javascript/lib/api'
 
@@ -22,7 +24,7 @@ const NO_FILTERS = { search: '', status: '', category: '', compensation: '', col
 // Each filter's label, "all" option and options as [value, label], in the Figma's order.
 const FILTERS = [
   { name: 'status', label: 'Status', all: 'All statuses', options: ['Live', 'Draft', 'Closed'] },
-  { name: 'category', label: 'Category', all: 'All categories', options: ['Sport', 'Lifestyle'] },
+  { name: 'category', label: 'Category', all: 'All categories', options: CATEGORIES },
   { name: 'compensation', label: 'Compensation', all: 'All compensation', options: ['Paid', 'Barter'] },
   {
     name: 'collaborationType',
@@ -167,8 +169,7 @@ function OpportunityRow({ opportunity, onAction }) {
 }
 
 // The Live checks' errors from a refused Reopen, or null for any other failure.
-const liveCheckErrors = (error) =>
-  error instanceof ApiError && error.status === 422 && Object.keys(error.fieldErrors).length > 0 ? error.fieldErrors : null
+const liveCheckErrors = fieldErrorsOf
 
 // The Admin Opportunities list (Figma "Creator Opportunities"): summary counts,
 // search and filters, all worked out by the API, and a menu on each row.
@@ -190,8 +191,7 @@ export default function OpportunitiesPage() {
 
   const unreachable = (opportunity, action) =>
     `Couldn't ${ACTIONS[action].verb} ${opportunity.title}. Check your connection and try again.`
-  const failure = (opportunity, action, error) =>
-    error instanceof ApiError && error.status < 500 ? error.message : unreachable(opportunity, action)
+  const failure = (opportunity, action, error) => messageOr(error, unreachable(opportunity, action))
 
   async function runAction(opportunity, action) {
     const { call, confirm, check } = ACTIONS[action]
@@ -268,34 +268,11 @@ export default function OpportunitiesPage() {
           <LoadError message="Couldn't load opportunities. Check your connection." onRetry={reload} />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" aria-busy={status === 'loading'}>
-                <thead>
-                  <tr className="border-b border-line bg-surface-soft">
-                    {COLUMNS.map((column) => (
-                      <th
-                        key={column}
-                        scope="col"
-                        className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap first:pl-5"
-                      >
-                        {column || <span className="sr-only">Actions</span>}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line-faint">
-                  {list === null ? (
-                    <MessageRow columns={COLUMNS.length}>Loading opportunities…</MessageRow>
-                  ) : list.opportunities.length === 0 ? (
-                    <MessageRow columns={COLUMNS.length}>No opportunities match the current filters</MessageRow>
-                  ) : (
-                    list.opportunities.map((opportunity) => (
-                      <OpportunityRow key={opportunity.id} opportunity={opportunity} onAction={runAction} />
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ListTable columns={COLUMNS} busy={status === 'loading'} rows={list?.opportunities ?? null} noun="opportunities">
+              {list?.opportunities.map((opportunity) => (
+                <OpportunityRow key={opportunity.id} opportunity={opportunity} onAction={runAction} />
+              ))}
+            </ListTable>
             {list && (
               <ListFooter
                 shown={list.opportunities.length}

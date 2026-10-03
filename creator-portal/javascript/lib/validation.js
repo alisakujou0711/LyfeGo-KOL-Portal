@@ -16,6 +16,17 @@ export function stripHandle(value) {
   return value.trim().replace(/^@+/, '')
 }
 
+// The contact details as the API takes them: trimmed, with the handles' @ removed.
+export function contactPayload(values) {
+  return {
+    fullName: values.fullName.trim(),
+    instagram: stripHandle(values.instagram),
+    tiktok: stripHandle(values.tiktok),
+    email: values.email.trim(),
+    phone: values.phone.trim(),
+  }
+}
+
 export function validateRegistration(values) {
   const errors = {}
 

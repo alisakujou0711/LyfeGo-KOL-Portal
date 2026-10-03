@@ -2,25 +2,18 @@
 and the cover image (Admin ticket 10)."""
 
 import json
-from datetime import datetime
-
 import pytest
 
-from tests.factories import BARTER, add_opportunity, add_session
-from tests.test_admin_save_opportunity import EMPTY_FORM, FILLED_FORM, create, created, editing, form_of, save
+from tests.admin_api import EMPTY_FORM, FILLED_FORM, create, created, editing, form_of, save
+from tests.factories import BARTER, TOMORROW_10AM, add_opportunity, add_session
 
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)  # a Wednesday
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
 
 LIVE = {**FILLED_FORM, "publishingStatus": "Live"}
 SATURDAYS = {"days": ["Sat"], "start": "20:00", "end": "21:00", "startDate": "2026-09-26", "endDate": "",
              "slots": ""}
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def errors_of(response):

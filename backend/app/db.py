@@ -1,5 +1,6 @@
 import re
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 import mysql.connector
 from fastapi import Depends
@@ -38,3 +39,36 @@ def contains_pattern(text: str) -> str:
     """A LIKE pattern, for use with ESCAPE '\\', matching values that contain
     `text` with its wildcard characters taken literally."""
     return "%" + re.sub(r"([\\%_])", r"\\\1", text) + "%"
+
+
+@contextmanager
+def transaction(conn: MySQLConnectionAbstract, *, isolation_level: str | None = None) -> Iterator[None]:
+    """A transaction around the block: committed when it ends, rolled back when it
+    raises. It first ends any earlier read's implicit transaction, so it starts fresh."""
+    conn.commit()
+    conn.start_transaction(isolation_level=isolation_level)
+    try:
+        yield
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def placeholders(values) -> str:
+    """One %s per value, for an IN (...) list or a VALUES row."""
+    return ", ".join(["%s"] * len(values))
+
+
+def insert(cursor, table: str, row: dict) -> int:
+    """Insert `row` (column: value) into `table`; returns its new id."""
+    cursor.execute(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({placeholders(row)})", list(row.values()))
+    return cursor.lastrowid
+
+
+def update(cursor, table: str, columns: dict, *, where: str, key) -> None:
+    """Set `columns` (column: value) on the `table` row whose `where` column is `key`."""
+    cursor.execute(
+        f"UPDATE {table} SET {', '.join(f'{column} = %s' for column in columns)} WHERE {where} = %s",
+        [*columns.values(), key],
+    )

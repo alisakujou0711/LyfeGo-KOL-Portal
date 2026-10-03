@@ -1,37 +1,25 @@
-import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { getAdminSession } from '../lib/api'
 
 // Renders the Admin pages only for a signed-in Admin. Anyone else goes to
 // sign-in, carrying the page they wanted so sign-in can bring them back.
 export default function RequireAdmin() {
   const location = useLocation()
-  const [state, setState] = useState({ status: 'checking' })
-  const [attempt, setAttempt] = useState(0)
+  const { status, data: admin, reload } = useApiQuery(getAdminSession, null)
 
-  useEffect(() => {
-    let current = true
-    setState({ status: 'checking' })
-    getAdminSession().then(
-      (admin) => current && setState(admin ? { status: 'signed-in', admin } : { status: 'signed-out' }),
-      () => current && setState({ status: 'failed' }),
-    )
-    return () => {
-      current = false
-    }
-  }, [attempt])
-
-  if (state.status === 'signed-out') {
+  if (status === 'loading') return <div className="min-h-screen bg-surface" />
+  if (status === 'ready' && admin === null) {
     const next = encodeURIComponent(location.pathname + location.search)
     return <Navigate to={`/admin/login?next=${next}`} replace />
   }
-  if (state.status === 'failed') {
+  if (status === 'error') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-surface px-4 text-center">
         <p className="text-sm text-gray-600">We couldn't reach the Admin Portal. Check your connection.</p>
         <button
           type="button"
-          onClick={() => setAttempt((n) => n + 1)}
+          onClick={reload}
           className="text-sm font-semibold text-brand hover:text-brand-dark"
         >
           Try again
@@ -39,6 +27,5 @@ export default function RequireAdmin() {
       </div>
     )
   }
-  if (state.status === 'checking') return <div className="min-h-screen bg-surface" />
-  return <Outlet context={{ admin: state.admin }} />
+  return <Outlet />
 }

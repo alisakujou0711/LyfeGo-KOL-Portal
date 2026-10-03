@@ -14,10 +14,10 @@ from datetime import datetime
 
 from mysql.connector.abstracts import MySQLConnectionAbstract
 
-from app.applications import ID_RE, Conflict, Invalid, contact_errors
+from app.applications import ID_RE, Conflict, Invalid, NotFound, choose_one_of, contact_errors
 from app.availability import SessionState, evaluate_session
-from app.db import contains_pattern
-from app.opportunities import session_from_row, session_times
+from app.db import contains_pattern, transaction, update
+from app.opportunities import ACCEPTED_COUNT, lock_session, session_from_row, session_times
 
 STATUSES = ("New", "Reviewing", "Accepted", "Declined")
 
@@ -38,6 +38,7 @@ _CANNOT_MOVE = {
 SESSION_FULL = "That session is full. Choose another or add slots first."
 OTHER_OPPORTUNITY = "Can't move: that session belongs to another opportunity."
 UNKNOWN_SESSION = "Choose one of this opportunity's sessions"
+NOT_FOUND = "Application not found"
 
 _APPLICATIONS = """
     SELECT a.*, o.Title, o.PartnerBrandName, o.Category, o.CompensationType,
@@ -51,10 +52,6 @@ _APPLICATIONS = """
 
 # The fields a PATCH may send.
 _CHANGES = ("status", "contact", "sessionId")
-
-
-class NotFound(Exception):
-    """No Application has that id."""
 
 
 def list_applications(
@@ -138,9 +135,7 @@ def get_application(conn: MySQLConnectionAbstract, application_id: str, *, now: 
         other_sessions = []
         if row is not None:
             cursor.execute(
-                """SELECT SessionID, SessionDate, StartTime, EndTime, CreatorSlots,
-                          (SELECT COUNT(*) FROM Application a
-                            WHERE a.CurrentSessionID = s.SessionID AND a.Status = 'Accepted') AS AcceptedCount
+                f"""SELECT SessionID, SessionDate, StartTime, EndTime, CreatorSlots, {ACCEPTED_COUNT}
                      FROM Session s
                     WHERE OpportunityID = %s AND SessionID <> %s AND NOT IsCancelled
                       AND TIMESTAMP(SessionDate, StartTime) > %s
@@ -153,7 +148,7 @@ def get_application(conn: MySQLConnectionAbstract, application_id: str, *, now: 
             ]
         conn.commit()  # end the reads' implicit transaction
     if row is None:
-        raise NotFound(application_id)
+        raise NotFound(NOT_FOUND)
     original = _original_contact(row)
     return {
         "id": str(row["ApplicationID"]),
@@ -243,12 +238,10 @@ def update_application(conn: MySQLConnectionAbstract, application_id: str, body:
     """
     changes = _validated(body)
     if not ID_RE.fullmatch(application_id):
-        raise NotFound(application_id)
-    conn.commit()  # end any earlier read, so the transaction below starts fresh
+        raise NotFound(NOT_FOUND)
     # READ COMMITTED: once the Session's lock is ours, the Accepted Count sees
     # every accept committed before it, however long the lock took.
-    conn.start_transaction(isolation_level="READ COMMITTED")
-    try:
+    with transaction(conn, isolation_level="READ COMMITTED"):
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             f"""SELECT Status, OpportunityID, CurrentSessionID, {', '.join(submitted for submitted, _ in _CONTACT_COLUMNS.values())}
@@ -257,7 +250,7 @@ def update_application(conn: MySQLConnectionAbstract, application_id: str, body:
         )
         application = cursor.fetchone()
         if application is None:
-            raise NotFound(application_id)
+            raise NotFound(NOT_FOUND)
         columns = {"UpdatedAt": now}
         if "contact" in changes:
             columns.update(_corrections(application, changes["contact"]))
@@ -267,11 +260,11 @@ def update_application(conn: MySQLConnectionAbstract, application_id: str, body:
         if destination != current:
             # Both Sessions, lowest id first, so two moves between them can't deadlock.
             for session_id in sorted((current, destination)):
-                _lock_session(cursor, session_id)
+                lock_session(cursor, session_id)
             _check_move(cursor, application["OpportunityID"], destination, accepted=status == "Accepted", now=now)
             columns["CurrentSessionID"] = destination
         elif status == "Accepted" and application["Status"] != "Accepted":
-            _lock_session(cursor, current)
+            lock_session(cursor, current)
             state = _session_state(cursor, current, now=now)[1]
             if state in _CANNOT_ACCEPT:
                 raise Conflict(_CANNOT_ACCEPT[state])
@@ -279,20 +272,8 @@ def update_application(conn: MySQLConnectionAbstract, application_id: str, body:
             columns["Status"] = status
             if status in _STATUS_TIMESTAMP_COLUMNS:
                 columns[_STATUS_TIMESTAMP_COLUMNS[status]] = now
-        cursor.execute(
-            f"UPDATE Application SET {', '.join(f'{column} = %s' for column in columns)} WHERE ApplicationID = %s",
-            [*columns.values(), application_id],
-        )
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
+        update(cursor, "Application", columns, where="ApplicationID", key=application_id)
     return get_application(conn, application_id, now=now)
-
-
-def _lock_session(cursor, session_id: int) -> None:
-    cursor.execute("SELECT SessionID FROM Session WHERE SessionID = %s FOR UPDATE", (session_id,))
-    cursor.fetchall()
 
 
 def _session_state(cursor, session_id: int, *, now: datetime) -> tuple[int, SessionState] | None:
@@ -303,10 +284,8 @@ def _session_state(cursor, session_id: int, *, now: datetime) -> tuple[int, Sess
     sees every accept committed before the lock was ours.
     """
     cursor.execute(
-        """SELECT SessionID, OpportunityID, SessionDate, StartTime, CreatorSlots, IsCancelled,
-                  (SELECT COUNT(*) FROM Application a
-                    WHERE a.CurrentSessionID = s.SessionID AND a.Status = 'Accepted') AS AcceptedCount
-             FROM Session s WHERE SessionID = %s""",
+        f"""SELECT SessionID, OpportunityID, SessionDate, StartTime, CreatorSlots, IsCancelled, {ACCEPTED_COUNT}
+              FROM Session s WHERE SessionID = %s""",
         (session_id,),
     )
     row = cursor.fetchone()
@@ -338,7 +317,7 @@ def _validated(body: dict) -> dict:
         if body["status"] in STATUSES:
             changes["status"] = body["status"]
         else:
-            errors["status"] = f"Choose {', '.join(STATUSES[:-1])} or {STATUSES[-1]}"
+            errors["status"] = choose_one_of(STATUSES)
     if "contact" in body:
         contact = body["contact"]
         if isinstance(contact, dict):

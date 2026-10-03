@@ -86,7 +86,7 @@ def sign_in(conn: MySQLConnectionAbstract, email: str, password: str) -> tuple[s
         return None
     token = secrets.token_urlsafe(32)
     cursor.execute("INSERT INTO AdminSession (TokenHash, AdminUserID) VALUES (%s, %s)",
-                   (_token_hash(token), row["AdminUserID"]))
+                   (token_hash(token), row["AdminUserID"]))
     conn.commit()
     return token, _admin(row)
 
@@ -97,7 +97,7 @@ def admin_for_token(conn: MySQLConnectionAbstract, token: str) -> dict | None:
         """SELECT u.Email, u.Name FROM AdminSession s
              JOIN AdminUser u ON u.AdminUserID = s.AdminUserID
             WHERE s.TokenHash = %s""",
-        (_token_hash(token),),
+        (token_hash(token),),
     )
     row = cursor.fetchone()
     conn.commit()  # end the read's implicit transaction
@@ -118,7 +118,7 @@ def current_admin(admin: dict | None = Depends(signed_in_admin)) -> dict:
     return admin
 
 
-def _token_hash(token: str) -> str:
+def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 

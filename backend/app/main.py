@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -7,7 +6,7 @@ from mysql.connector.abstracts import MySQLConnectionAbstract
 
 from app import admin_routes
 from app.admins import signed_in_admin
-from app.applications import Conflict, Invalid, create_application
+from app.applications import ID_RE, Conflict, Invalid, NotFound, create_application
 from app.clock import now_sgt
 from app.config import Settings, get_settings
 from app.db import get_db
@@ -23,6 +22,11 @@ def invalid_fields(request: Request, invalid: Invalid):
     return JSONResponse(
         status_code=422, content={"detail": "Please check the highlighted fields.", "errors": invalid.errors},
     )
+
+
+@app.exception_handler(NotFound)
+def not_found(request: Request, error: NotFound):
+    return JSONResponse(status_code=404, content={"detail": str(error)})
 
 
 @app.exception_handler(Conflict)
@@ -59,11 +63,12 @@ def opportunity_detail(
 ):
     """An Opportunity's detail. A signed-in Admin also gets a Draft, to preview it (to_ask.md D2)."""
     # A malformed id is as unknown as a missing one: not found, not a validation error.
-    is_id = re.fullmatch(r"[0-9]+", opportunity_id)
-    top_up_rolling_windows(db, now=now)
-    detail = get_detail(db, int(opportunity_id), now=now, include_draft=admin is not None) if is_id else None
+    detail = None
+    if ID_RE.fullmatch(opportunity_id):
+        top_up_rolling_windows(db, now=now, opportunity_ids=[int(opportunity_id)])
+        detail = get_detail(db, int(opportunity_id), now=now, include_draft=admin is not None)
     if detail is None:
-        raise HTTPException(status_code=404, detail="Opportunity not found")
+        raise NotFound("Opportunity not found")
     return detail
 
 

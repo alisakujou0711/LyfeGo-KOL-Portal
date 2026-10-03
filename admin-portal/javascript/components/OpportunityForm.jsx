@@ -1,6 +1,20 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ApiError, IMAGE_TYPES, MAX_IMAGE_BYTES, uploadImage } from '../lib/api'
+import { CloseIcon, ExternalIcon } from '../../../creator-portal/javascript/components/Icons'
+import {
+  CATEGORIES,
+  COLLABORATION_TYPES,
+  COMPENSATION_TYPES,
+  CURRENCIES,
+  DELIVERABLE_TYPES,
+  IMAGE_TYPES,
+  MAX_IMAGE_BYTES,
+  PAYMENT_BASES,
+  PUBLISHING_STATUSES,
+  fieldErrorsOf,
+  messageOr,
+  uploadImage,
+} from '../lib/api'
 import { formatSessionLine } from '../lib/format'
 import ConfirmDialog from './ConfirmDialog'
 
@@ -20,6 +34,7 @@ import ConfirmDialog from './ConfirmDialog'
 const SHORT = 255
 const LONG = 5000
 const URL_LENGTH = 500
+const ADDRESS_LENGTH = 500
 const ITEM_LENGTH = 500
 const MAX_ROWS = 10
 
@@ -89,8 +104,6 @@ const SECTIONS = [
   ['publishing', 'Publishing'],
 ]
 
-const COLLABORATION_TYPES = ['One-off', 'One-off or Ongoing', 'Ongoing']
-const PAYMENT_BASES = ['Per completed collaboration', 'Per post', 'Flat fee']
 const EXPERIENCE_LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'All Levels', 'Not Applicable']
 // Picked on their own: picking one clears the rest (FS-ADM-FLD-005, to_ask.md A9).
 const LEVELS_ON_THEIR_OWN = ['All Levels', 'Not Applicable']
@@ -100,7 +113,8 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 let lastKey = 0
 const withKey = (row) => ({ ...row, key: ++lastKey })
 
-const blankSession = () => withKey({ date: '', start: '', end: '', slots: '' })
+const EMPTY_SESSION = { date: '', start: '', end: '', slots: '' }
+const blankSession = () => withKey(EMPTY_SESSION)
 const blankRecurring = () => ({ days: [], start: '', end: '', startDate: '', endDate: '', slots: '' })
 
 // A stored number as its text box shows it; blank for none.
@@ -202,6 +216,8 @@ const INPUT_LOOK =
 const INPUT = `w-full px-3.5 py-2.5 ${INPUT_LOOK}`
 const INPUT_OK = 'border-line-strong hover:border-gray-300'
 const INPUT_ERROR = 'border-red-400 bg-red-50/30'
+// A usual-size text box, red when it has an `error`.
+const inputClass = (error) => `${INPUT} ${error ? INPUT_ERROR : INPUT_OK}`
 
 function PlusIcon() {
   return (
@@ -258,7 +274,7 @@ function TextField({ label, optional, hint, error, value, onChange, multiline = 
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={Boolean(error) || undefined}
         aria-describedby={describedBy}
-        className={`${INPUT} ${error ? INPUT_ERROR : INPUT_OK} ${multiline ? 'resize-none' : ''}`}
+        className={`${inputClass(error)} ${multiline ? 'resize-none' : ''}`}
         {...inputProps}
       />
       {hint && (
@@ -268,23 +284,6 @@ function TextField({ label, optional, hint, error, value, onChange, multiline = 
       )}
       <FieldError id={errorId} error={error} />
     </div>
-  )
-}
-
-function CloseIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function ExternalIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
-      <path d="M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M8 1.5h3.5V5M11.5 1.5L6.5 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   )
 }
 
@@ -320,7 +319,7 @@ function ImageField({ value, error, uploading, onUploading, onChange }) {
       if (change === changes.current) onChange(url)
     } catch (failure) {
       if (change === changes.current) {
-        setUploadError(failure instanceof ApiError && failure.status < 500 ? failure.message : UPLOAD_FAILED)
+        setUploadError(messageOr(failure, UPLOAD_FAILED))
       }
     } finally {
       if (change === changes.current) onUploading(false)
@@ -348,7 +347,7 @@ function ImageField({ value, error, uploading, onUploading, onChange }) {
               onClick={() => change('')}
               className="absolute top-2 right-2 w-7 h-7 bg-black/50 rounded-lg text-white flex items-center justify-center hover:bg-black/70 transition-colors"
             >
-              <CloseIcon />
+              <CloseIcon size={12} />
             </button>
           </div>
         )}
@@ -362,7 +361,7 @@ function ImageField({ value, error, uploading, onUploading, onChange }) {
             onChange={(event) => change(event.target.value)}
             aria-invalid={Boolean(shownError) || undefined}
             aria-describedby={[hintId, shownError && errorId].filter(Boolean).join(' ')}
-            className={`${INPUT} flex-1 ${shownError ? INPUT_ERROR : INPUT_OK}`}
+            className={`${inputClass(shownError)} flex-1`}
           />
           <button
             type="button"
@@ -487,6 +486,100 @@ function RemoveButton({ label, onClick }) {
         <path d="M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       </svg>
     </button>
+  )
+}
+
+// The numbered Deliverable Items: at least one row, up to MAX_ROWS.
+// `rows` are { key, text }; `onChange(index, change)` updates one.
+function DeliverablesField({ rows, errors, onChange, onRemove, onAdd }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <FieldLabel label="Deliverable Items" />
+      <ol className="flex flex-col gap-2">
+        {rows.map((row, index) => {
+          const error = errors[`deliverables.${index}`]
+          return (
+            <li key={row.key} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 w-5 text-right shrink-0" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <input
+                  type="text"
+                  aria-label={`Deliverable ${index + 1}`}
+                  placeholder="e.g. 1 × Instagram Reel featuring the session"
+                  maxLength={ITEM_LENGTH}
+                  value={row.text}
+                  onChange={(event) => onChange(index, { text: event.target.value })}
+                  aria-invalid={Boolean(error) || undefined}
+                  className={inputClass(error)}
+                />
+                {rows.length > 1 && <RemoveButton label={`Remove deliverable ${index + 1}`} onClick={() => onRemove(index)} />}
+              </div>
+              <div className="pl-7">
+                <FieldError error={error} />
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+      <FieldError error={errors.deliverables} />
+      {rows.length < MAX_ROWS && <AddButton onClick={onAdd}>Add Deliverable</AddButton>}
+    </div>
+  )
+}
+
+// The Additional Requirements' label → value rows, up to MAX_ROWS.
+// `rows` are { key, label, value }; `onChange(index, change)` updates one.
+function RequirementsField({ rows, errors, onChange, onRemove, onAdd }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <FieldLabel label="Additional Requirements" optional />
+      <p className="text-xs text-gray-400 -mt-1">
+        Custom label/value rows for activity-specific details. E.g. &quot;Equipment&quot; → &quot;Climbing shoes provided&quot;.
+      </p>
+      {rows.length > 0 && (
+        <ul className="flex flex-col gap-2 mt-1">
+          {rows.map((row, index) => {
+            const labelError = errors[`additionalInfo.${index}.label`]
+            const valueError = errors[`additionalInfo.${index}.value`]
+            return (
+              <li key={row.key} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    aria-label={`Requirement ${index + 1} label`}
+                    placeholder="Label (e.g. Equipment)"
+                    maxLength={SHORT}
+                    value={row.label}
+                    onChange={(event) => onChange(index, { label: event.target.value })}
+                    aria-invalid={Boolean(labelError) || undefined}
+                    className={inputClass(labelError)}
+                  />
+                  <span className="text-gray-300 shrink-0 text-sm" aria-hidden="true">
+                    →
+                  </span>
+                  <input
+                    type="text"
+                    aria-label={`Requirement ${index + 1} value`}
+                    placeholder="Value (e.g. Shoes provided)"
+                    maxLength={ITEM_LENGTH}
+                    value={row.value}
+                    onChange={(event) => onChange(index, { value: event.target.value })}
+                    aria-invalid={Boolean(valueError) || undefined}
+                    className={inputClass(valueError)}
+                  />
+                  <RemoveButton label={`Remove requirement ${index + 1}`} onClick={() => onRemove(index)} />
+                </div>
+                <FieldError error={labelError ?? valueError} />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <FieldError error={errors.additionalInfo} />
+      {rows.length < MAX_ROWS && <AddButton onClick={onAdd}>Add Requirement</AddButton>}
+    </div>
   )
 }
 
@@ -862,26 +955,23 @@ export default function OpportunityForm({
   // B6: an Opportunity loaded with a Recurring Schedule and one-off Sessions shows both.
   const showSessions = form.scheduleType === 'specific' || initial.sessions.some((session) => session.id)
 
-  // Unsaved changes: the form as it would be sent differs from how it opened.
-  const opened = useMemo(() => JSON.stringify(requestFrom(initial, initial.publishingStatus, true)), [initial])
-  const changed = JSON.stringify(requestFrom(form, form.publishingStatus, true)) !== opened
-
-  // Cancel and the breadcrumb ask first when there are unsaved changes (FS-ADM-OPP-004).
+  // Cancel and the breadcrumb ask first when there are unsaved changes (FS-ADM-OPP-004):
+  // when the form as it would be sent differs from how it opened.
   function handleLeave(event) {
-    if (!changed) return
+    const asSent = (fields) => JSON.stringify(requestFrom(fields, fields.publishingStatus, true))
+    if (asSent(form) === asSent(initial)) return
     event.preventDefault()
     setAsking({ ...CONFIRM_DISCARD, onConfirm: () => navigate('/admin/opportunities') })
   }
 
   // Shows a failed save or check of `publishingStatus` in the form.
   function showFailure(action, publishingStatus, error) {
-    const known = error instanceof ApiError && error.status < 500
-    const fieldErrors = known ? error.fieldErrors : {}
+    const fieldErrors = fieldErrorsOf(error) ?? {}
     const refused = publishingStatus === 'Live' && Object.keys(fieldErrors).length > 0
     setSave({
       state: refused ? 'refused' : 'failed',
       action,
-      message: known ? error.message : SAVE_FAILED[action],
+      message: messageOr(error, SAVE_FAILED[action]),
       errors: fieldErrors,
     })
   }
@@ -917,24 +1007,23 @@ export default function OpportunityForm({
         try {
           await onSave(request)
         } catch (error) {
-          if (!(error instanceof ApiError && error.status === 422 && Object.keys(error.fieldErrors).length > 0)) throw error
+          if (!fieldErrorsOf(error)) throw error
           setAsking(null)
           showFailure(action, publishingStatus, error)
         }
       },
     })
   }
-  const canSaveDraft = storedStatus === null || storedStatus === 'Draft'
+  const allowed = ALLOWED_STATUSES[storedStatus]
   const buttons = {
     saving,
     busy: uploading,
     onLeave: handleLeave,
-    onSaveDraft: canSaveDraft ? () => handleSave('draft') : undefined,
+    onSaveDraft: allowed.includes('Draft') ? () => handleSave('draft') : undefined,
     onPublish: () => handleSave('publish'),
   }
-  const allowed = ALLOWED_STATUSES[storedStatus]
   const refusedStatuses = Object.fromEntries(
-    ['Draft', 'Live', 'Closed'].filter((status) => !allowed.includes(status)).map((s) => [s, REFUSED_STATUS[storedStatus]]),
+    PUBLISHING_STATUSES.filter((status) => !allowed.includes(status)).map((s) => [s, REFUSED_STATUS[storedStatus]]),
   )
 
   const paid = form.compensationType === 'Paid'
@@ -1017,7 +1106,7 @@ export default function OpportunityForm({
             <div className="grid grid-cols-2 gap-4">
               <ChoiceField
                 label="Category"
-                options={['Sport', 'Lifestyle']}
+                options={CATEGORIES}
                 value={form.category}
                 error={errors.category}
                 onChange={(category) => update({ category })}
@@ -1054,7 +1143,7 @@ export default function OpportunityForm({
           <Section id="collaboration" title="2. Collaboration">
             <ChoiceField
               label="Compensation Type"
-              options={['Barter', 'Paid']}
+              options={COMPENSATION_TYPES}
               value={form.compensationType}
               error={errors.compensationType}
               onChange={(compensationType) => update({ compensationType })}
@@ -1065,7 +1154,7 @@ export default function OpportunityForm({
                   <div className="col-span-2">
                     <ChoiceField
                       label="Currency"
-                      options={['SGD', 'USD']}
+                      options={CURRENCIES}
                       value={form.currency}
                       error={errors.currency}
                       onChange={(currency) => update({ currency })}
@@ -1123,7 +1212,7 @@ export default function OpportunityForm({
           <Section id="deliverables" title="3. Content Deliverables">
             <ChoiceField
               label="Deliverable Type"
-              options={['Fixed', 'Flexible']}
+              options={DELIVERABLE_TYPES}
               value={form.deliverableType}
               error={errors.deliverableType}
               onChange={(deliverableType) => update({ deliverableType })}
@@ -1138,40 +1227,13 @@ export default function OpportunityForm({
               error={errors.deliverableNote}
               onChange={(deliverableNote) => update({ deliverableNote })}
             />
-            <div className="flex flex-col gap-2">
-              <FieldLabel label="Deliverable Items" />
-              <ol className="flex flex-col gap-2">
-                {form.deliverables.map((row, index) => (
-                  <li key={row.key} className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 w-5 text-right shrink-0" aria-hidden="true">
-                        {index + 1}
-                      </span>
-                      <input
-                        type="text"
-                        aria-label={`Deliverable ${index + 1}`}
-                        placeholder="e.g. 1 × Instagram Reel featuring the session"
-                        maxLength={ITEM_LENGTH}
-                        value={row.text}
-                        onChange={(event) => updateRow('deliverables', index, { text: event.target.value })}
-                        aria-invalid={Boolean(errors[`deliverables.${index}`]) || undefined}
-                        className={`${INPUT} ${errors[`deliverables.${index}`] ? INPUT_ERROR : INPUT_OK}`}
-                      />
-                      {form.deliverables.length > 1 && (
-                        <RemoveButton label={`Remove deliverable ${index + 1}`} onClick={() => removeRow('deliverables', index)} />
-                      )}
-                    </div>
-                    <div className="pl-7">
-                      <FieldError error={errors[`deliverables.${index}`]} />
-                    </div>
-                  </li>
-                ))}
-              </ol>
-              <FieldError error={errors.deliverables} />
-              {form.deliverables.length < MAX_ROWS && (
-                <AddButton onClick={() => addRow('deliverables', { text: '' })}>Add Deliverable</AddButton>
-              )}
-            </div>
+            <DeliverablesField
+              rows={form.deliverables}
+              errors={errors}
+              onChange={(index, change) => updateRow('deliverables', index, change)}
+              onRemove={(index) => removeRow('deliverables', index)}
+              onAdd={() => addRow('deliverables', { text: '' })}
+            />
           </Section>
 
           <Section
@@ -1184,55 +1246,13 @@ export default function OpportunityForm({
               error={errors.experienceLevels}
               onChange={(experienceLevels) => update({ experienceLevels })}
             />
-            <div className="flex flex-col gap-2">
-              <FieldLabel label="Additional Requirements" optional />
-              <p className="text-xs text-gray-400 -mt-1">
-                Custom label/value rows for activity-specific details. E.g. &quot;Equipment&quot; → &quot;Climbing shoes provided&quot;.
-              </p>
-              {form.additionalInfo.length > 0 && (
-                <ul className="flex flex-col gap-2 mt-1">
-                  {form.additionalInfo.map((row, index) => {
-                    const labelError = errors[`additionalInfo.${index}.label`]
-                    const valueError = errors[`additionalInfo.${index}.value`]
-                    return (
-                      <li key={row.key} className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            aria-label={`Requirement ${index + 1} label`}
-                            placeholder="Label (e.g. Equipment)"
-                            maxLength={SHORT}
-                            value={row.label}
-                            onChange={(event) => updateRow('additionalInfo', index, { label: event.target.value })}
-                            aria-invalid={Boolean(labelError) || undefined}
-                            className={`${INPUT} ${labelError ? INPUT_ERROR : INPUT_OK}`}
-                          />
-                          <span className="text-gray-300 shrink-0 text-sm" aria-hidden="true">
-                            →
-                          </span>
-                          <input
-                            type="text"
-                            aria-label={`Requirement ${index + 1} value`}
-                            placeholder="Value (e.g. Shoes provided)"
-                            maxLength={ITEM_LENGTH}
-                            value={row.value}
-                            onChange={(event) => updateRow('additionalInfo', index, { value: event.target.value })}
-                            aria-invalid={Boolean(valueError) || undefined}
-                            className={`${INPUT} ${valueError ? INPUT_ERROR : INPUT_OK}`}
-                          />
-                          <RemoveButton label={`Remove requirement ${index + 1}`} onClick={() => removeRow('additionalInfo', index)} />
-                        </div>
-                        <FieldError error={labelError ?? valueError} />
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              <FieldError error={errors.additionalInfo} />
-              {form.additionalInfo.length < MAX_ROWS && (
-                <AddButton onClick={() => addRow('additionalInfo', { label: '', value: '' })}>Add Requirement</AddButton>
-              )}
-            </div>
+            <RequirementsField
+              rows={form.additionalInfo}
+              errors={errors}
+              onChange={(index, change) => updateRow('additionalInfo', index, change)}
+              onRemove={(index) => removeRow('additionalInfo', index)}
+              onAdd={() => addRow('additionalInfo', { label: '', value: '' })}
+            />
           </Section>
 
           <Section id="schedule" title="5. Schedule & Availability">
@@ -1267,7 +1287,7 @@ export default function OpportunityForm({
                   />
                 ))}
                 <FieldError error={errors.sessions} />
-                <AddButton onClick={() => addRow('sessions', { date: '', start: '', end: '', slots: '' })}>Add Session</AddButton>
+                <AddButton onClick={() => addRow('sessions', EMPTY_SESSION)}>Add Session</AddButton>
               </div>
             )}
           </Section>
@@ -1288,7 +1308,7 @@ export default function OpportunityForm({
               optional
               placeholder="e.g. 52 Stadium Road, Singapore 397724"
               hint="Shown in the Location section on the opportunity detail page"
-              maxLength={URL_LENGTH}
+              maxLength={ADDRESS_LENGTH}
               value={form.fullAddress}
               error={errors.fullAddress}
               onChange={(fullAddress) => update({ fullAddress })}
@@ -1307,7 +1327,7 @@ export default function OpportunityForm({
           <Section id="publishing" title="7. Publishing">
             <ChoiceField
               label="Status"
-              options={['Draft', 'Live', 'Closed']}
+              options={PUBLISHING_STATUSES}
               value={form.publishingStatus}
               disabled={refusedStatuses}
               error={errors.publishingStatus}

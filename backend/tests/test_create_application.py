@@ -1,26 +1,15 @@
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
 from tests.factories import (
-    PAID,
-    add_application,
-    add_deliverable,
-    add_info,
-    add_opportunity,
-    add_schedule,
+    NOW, PAID, TOMORROW_10AM, add_application, add_deliverable, add_info, add_opportunity, add_schedule,
     add_session,
 )
 
-# Naive Singapore Time, as stored in the database.
-NOW = datetime(2026, 9, 23, 12, 0)
-TOMORROW_10AM = datetime(2026, 9, 24, 10, 0)
 
-
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def submission(opportunity_id, session_id, **overrides):

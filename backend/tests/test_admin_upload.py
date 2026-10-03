@@ -1,12 +1,10 @@
 """Uploading a cover image from the Admin form (Admin ticket 08, to_ask.md D3)."""
 
-from datetime import datetime
-
 import pytest
 
-from tests.test_admin_save_opportunity import FILLED_FORM, created
+from tests.admin_api import FILLED_FORM, created
 
-NOW = datetime(2026, 9, 23, 12, 0)
+
 MB = 1024 * 1024
 
 # Just enough of each format for its signature.
@@ -18,9 +16,7 @@ WRONG_TYPE = "Upload a JPEG, PNG or WebP image"
 TOO_LARGE = "The image must be 5 MB or smaller"
 
 
-@pytest.fixture(autouse=True)
-def frozen_now(at):
-    at(NOW)
+pytestmark = pytest.mark.usefixtures("frozen_now")
 
 
 def upload(client, content: bytes, content_type="application/octet-stream"):

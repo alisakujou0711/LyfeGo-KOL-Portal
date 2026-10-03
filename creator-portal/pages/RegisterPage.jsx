@@ -8,7 +8,7 @@ import OpportunitySummary from '../javascript/components/OpportunitySummary'
 import { useRegistration } from '../javascript/context/RegistrationContext'
 import { availableSession, useOpportunity } from '../javascript/hooks/useOpportunity'
 import { ApiError, submitApplication } from '../javascript/lib/api'
-import { EMPTY_FORM, stripHandle, validateRegistration } from '../javascript/lib/validation'
+import { EMPTY_FORM, contactPayload, validateRegistration } from '../javascript/lib/validation'
 import NotFoundPage from './NotFoundPage'
 
 // Whether the API rejected a field the creator can see and fix (not e.g. sessionId).
@@ -93,11 +93,7 @@ function RegisterForm({ opportunity, session }) {
       const payload = {
         opportunityId: opportunity.id,
         sessionId: session.id,
-        fullName: values.fullName.trim(),
-        instagram: stripHandle(values.instagram),
-        tiktok: stripHandle(values.tiktok),
-        email: values.email.trim(),
-        phone: values.phone.trim(),
+        ...contactPayload(values),
         note: values.note.trim(),
         submissionKey,
       }

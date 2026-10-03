@@ -1,8 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { jsonResponse, renderRoute } from '../../creator-portal/javascript/test/renderRoute'
-
-const ADMIN = { email: 'staff@lyfego.test', name: 'Staff Member' }
+import { ADMIN, bodyRows } from '../javascript/test/adminFixtures'
 
 const TENNIS = { id: '1', title: 'Tennis Group Class', partner: 'The Best Group', category: 'Sport', compensationType: 'Paid' }
 const COFFEE = {
@@ -171,11 +170,6 @@ function applicationsApi({ stored = applications(), onPatch } = {}) {
 function renderApplications(path = '/admin/applications', options) {
   const { api, queries, patches } = applicationsApi(options)
   return { ...renderRoute(path, { api }), queries, patches }
-}
-
-function bodyRows() {
-  const [, body] = screen.getAllByRole('rowgroup')
-  return within(body).getAllByRole('row')
 }
 
 async function rowFor(name) {

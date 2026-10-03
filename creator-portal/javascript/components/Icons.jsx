@@ -89,6 +89,26 @@ export function ChevronLeftIcon({ className = '' }) {
   )
 }
 
+// An ✕ in a `size` px square.
+export function CloseIcon({ className = '', size = 14 }) {
+  const end = size - 2
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={className} {...base}>
+      <path d={`M2 2l${end - 2} ${end - 2}M${end} 2L2 ${end}`} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+// Opens in a new tab.
+export function ExternalIcon({ className = '' }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" className={`shrink-0 ${className}`} {...base}>
+      <path d="M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M8 1.5h3.5V5M11.5 1.5L6.5 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export function CheckIcon({ className = '', size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" className={className} {...base}>

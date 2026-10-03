@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from mysql.connector.abstracts import MySQLConnectionAbstract
 
 from app import admin_opportunities
-from app.admin_applications import NotFound, get_application, list_applications, update_application
+from app.admin_applications import get_application, list_applications, update_application
 from app.admins import COOKIE, SIGN_IN_FAILED, current_admin, sign_in
+from app.applications import ID_RE
 from app.clock import now_sgt
 from app.config import Settings, get_settings
 from app.db import get_db
@@ -16,8 +17,7 @@ from app.opportunities import list_for_admin
 from app.schedule import top_up_rolling_windows
 from app.uploads import MAX_BYTES, TOO_LARGE, Refused, store_upload
 
-APPLICATION_NOT_FOUND = "Application not found"
-OPPORTUNITY_NOT_FOUND = "Opportunity not found"
+# An unknown id raises app.applications.NotFound, which app.main's handler makes a 404.
 
 sign_in_router = APIRouter(prefix="/api/admin")
 
@@ -79,11 +79,8 @@ def opportunity_for_editing(
     opportunity_id: str, db: MySQLConnectionAbstract = Depends(get_db), now: datetime = Depends(now_sgt),
 ):
     """Every field of one Opportunity for the edit page, with its version token."""
-    top_up_rolling_windows(db, now=now)
-    try:
-        return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
-    except admin_opportunities.NotFound:
-        raise HTTPException(status_code=404, detail=OPPORTUNITY_NOT_FOUND)
+    _top_up(db, opportunity_id, now)
+    return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
 
 
 @router.put("/opportunities/{opportunity_id}")
@@ -98,13 +95,10 @@ def save_opportunity(
     it reloaded: 422 for a bad field, a move the publishing rules don't allow or a failed Live
     check, 409 when someone else saved it since `body["version"]` was loaded. With
     `?check=true`, only checks: 204, nothing stored."""
-    try:
-        admin_opportunities.update_opportunity(db, opportunity_id, body, now=now, check=check)
-        if check:
-            return Response(status_code=204)
-        return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
-    except admin_opportunities.NotFound:
-        raise HTTPException(status_code=404, detail=OPPORTUNITY_NOT_FOUND)
+    admin_opportunities.update_opportunity(db, opportunity_id, body, now=now, check=check)
+    if check:
+        return Response(status_code=204)
+    return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
 
 
 @router.post("/opportunities/{opportunity_id}/publish")
@@ -116,14 +110,11 @@ def publish_opportunity(
     and return it as the edit page loads it. 422 with the Live checks' errors, keyed as
     the edit page shows them; 409 when it's Live already or someone saved it meanwhile.
     With `?check=true`, only checks: 204, nothing stored."""
-    top_up_rolling_windows(db, now=now)
+    _top_up(db, opportunity_id, now)
+    admin_opportunities.publish_opportunity(db, opportunity_id, now=now, check=check)
     if check:
-        try:
-            admin_opportunities.publish_opportunity(db, opportunity_id, now=now, check=True)
-        except admin_opportunities.NotFound:
-            raise HTTPException(status_code=404, detail=OPPORTUNITY_NOT_FOUND)
         return Response(status_code=204)
-    return _after(admin_opportunities.publish_opportunity, db, opportunity_id, now)
+    return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
 
 
 @router.post("/opportunities/{opportunity_id}/close")
@@ -131,17 +122,15 @@ def close_opportunity(
     opportunity_id: str, db: MySQLConnectionAbstract = Depends(get_db), now: datetime = Depends(now_sgt),
 ):
     """Close a Live Opportunity, keeping its Sessions and Applications; 409 when it isn't Live."""
-    return _after(admin_opportunities.close_opportunity, db, opportunity_id, now)
+    admin_opportunities.close_opportunity(db, opportunity_id, now=now)
+    return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
 
 
 @router.delete("/opportunities/{opportunity_id}", status_code=204)
 def delete_opportunity(opportunity_id: str, db: MySQLConnectionAbstract = Depends(get_db)):
     """Delete a Draft that has never been Live or had an Application, with everything it
     has; 409 for any other Opportunity."""
-    try:
-        admin_opportunities.delete_draft(db, opportunity_id)
-    except admin_opportunities.NotFound:
-        raise HTTPException(status_code=404, detail=OPPORTUNITY_NOT_FOUND)
+    admin_opportunities.delete_draft(db, opportunity_id)
     return Response(status_code=204)
 
 
@@ -150,20 +139,14 @@ def duplicate_opportunity(
     opportunity_id: str, db: MySQLConnectionAbstract = Depends(get_db), now: datetime = Depends(now_sgt),
 ):
     """Copy an Opportunity into a new Draft and return the copy as the edit page loads it."""
-    try:
-        copy_id = admin_opportunities.duplicate_opportunity(db, opportunity_id, now=now)
-    except admin_opportunities.NotFound:
-        raise HTTPException(status_code=404, detail=OPPORTUNITY_NOT_FOUND)
+    copy_id = admin_opportunities.duplicate_opportunity(db, opportunity_id, now=now)
     return admin_opportunities.get_for_editing(db, copy_id, now=now)
 
 
-def _after(action, db, opportunity_id: str, now: datetime) -> dict:
-    """Run a row-menu `action` on the Opportunity and return it as the edit page loads it."""
-    try:
-        action(db, opportunity_id, now=now)
-        return admin_opportunities.get_for_editing(db, opportunity_id, now=now)
-    except admin_opportunities.NotFound:
-        raise HTTPException(status_code=404, detail=OPPORTUNITY_NOT_FOUND)
+def _top_up(db, opportunity_id: str, now: datetime) -> None:
+    """Top up the rolling window of just the Opportunity a route reads (app.schedule)."""
+    if ID_RE.fullmatch(opportunity_id):
+        top_up_rolling_windows(db, now=now, opportunity_ids=[int(opportunity_id)])
 
 
 @router.post("/uploads", status_code=201)
@@ -198,10 +181,7 @@ def application_detail(
 ):
     """One Application for the detail panel, with the Sessions it can be moved to."""
     top_up_rolling_windows(db, now=now)
-    try:
-        return get_application(db, application_id, now=now)
-    except NotFound:
-        raise HTTPException(status_code=404, detail=APPLICATION_NOT_FOUND)
+    return get_application(db, application_id, now=now)
 
 
 @router.patch("/applications/{application_id}")
@@ -214,7 +194,4 @@ def change_application(
     """Change any of the Application Status, contact details and Current Session: 422 for a
     bad or unknown field (app.main's handler), 409 when accepting or moving would overbook,
     or the Session has started, is Cancelled or belongs to another Opportunity."""
-    try:
-        return update_application(db, application_id, body, now=now)
-    except NotFound:
-        raise HTTPException(status_code=404, detail=APPLICATION_NOT_FOUND)
+    return update_application(db, application_id, body, now=now)

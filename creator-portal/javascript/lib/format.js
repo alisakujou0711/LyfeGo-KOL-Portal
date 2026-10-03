@@ -28,6 +28,11 @@ export function formatTimeRange(session) {
   return `${formatTime(session.start)} – ${formatTime(session.end)}`
 }
 
+// "Saturday, 27 September · 8:00 PM – 9:00 PM"
+export function formatSessionLine(session) {
+  return `${formatLongDate(session.date)} · ${formatTimeRange(session)}`
+}
+
 // A local calendar date as "2026-09-24".
 export function toIsoDate(date) {
   const pad = (n) => String(n).padStart(2, '0')

@@ -9,7 +9,8 @@ from mysql.connector.abstracts import MySQLConnectionAbstract
 from mysql.connector.errors import IntegrityError
 
 from app.availability import OpportunityState, SessionState
-from app.opportunities import get_detail, listed_sessions
+from app.db import transaction
+from app.opportunities import get_detail, listed_sessions, lock_session
 
 OPPORTUNITY_UNAVAILABLE = "This opportunity is no longer accepting registrations."
 SESSION_FILLED = "This session is now full. Please choose another session."
@@ -24,9 +25,18 @@ ID_RE = re.compile(r"[0-9]{1,10}")
 MAX_NOTE_LENGTH = 5000
 
 
+class NotFound(Exception):
+    """There's nothing with that id; the message says what, e.g. "Opportunity not found" (404)."""
+
+
 class Conflict(Exception):
     """The request can't be done in the data's current state, e.g. the Session can no longer be
     applied for or accepted into; the message is readable by whoever made the request (409)."""
+
+
+def choose_one_of(options) -> str:
+    """The message for a value that isn't one of `options`, e.g. "Choose Sport or Lifestyle"."""
+    return f"Choose {', '.join(options[:-1])} or {options[-1]}"
 
 
 class Invalid(Exception):
@@ -138,16 +148,11 @@ def _application_with_key(conn, submission_key: str) -> str | None:
 
 
 def _insert_application(conn, submission: dict, *, now: datetime) -> str:
-    conn.start_transaction()
-    try:
+    with transaction(conn):
         # Lock the chosen Session so it can't change (e.g. be cancelled) between
         # the check and the insert; later reads see its latest committed state.
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT SessionID FROM Session WHERE SessionID = %s FOR UPDATE",
-            (submission["sessionId"],),
-        )
-        cursor.fetchall()
+        lock_session(cursor, submission["sessionId"])
         detail, session = _chosen_session(conn, submission, now=now)
         creator = {
             "fullName": submission["fullName"],
@@ -169,11 +174,7 @@ def _insert_application(conn, submission: dict, *, now: datetime) -> str:
                 json.dumps(historical_snapshot(detail, session, creator)), now, submission["submissionKey"],
             ),
         )
-        conn.commit()
-        return str(cursor.lastrowid)
-    except BaseException:
-        conn.rollback()
-        raise
+    return str(cursor.lastrowid)
 
 
 def _chosen_session(conn, submission: dict, *, now: datetime) -> tuple[dict, dict]:

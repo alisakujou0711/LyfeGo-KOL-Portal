@@ -72,6 +72,41 @@ export function MessageRow({ columns, children }) {
   )
 }
 
+// A list page's table: a header row naming `columns` (an empty one is the row
+// menu's, named for screen readers only), then "Loading <noun>…" until `rows`
+// have loaded, "No <noun> match the current filters" when there are none, or
+// the rows themselves (`children`).
+export function ListTable({ columns, busy, rows, noun, children }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm" aria-busy={busy}>
+        <thead>
+          <tr className="border-b border-line bg-surface-soft">
+            {columns.map((column, index) => (
+              <th
+                key={column || index}
+                scope="col"
+                className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap first:pl-5"
+              >
+                {column || <span className="sr-only">Actions</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line-faint">
+          {rows === null ? (
+            <MessageRow columns={columns.length}>{`Loading ${noun}…`}</MessageRow>
+          ) : rows.length === 0 ? (
+            <MessageRow columns={columns.length}>{`No ${noun} match the current filters`}</MessageRow>
+          ) : (
+            children
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // Shown instead of a list, or a panel's content, that couldn't load.
 export function LoadError({ message, onRetry }) {
   return (
