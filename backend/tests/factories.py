@@ -64,13 +64,21 @@ def add_session(conn, opportunity_id, starts_at: datetime, *, slots=3, cancelled
     })
 
 
-def add_schedule(conn, opportunity_id, first_starts_at: datetime, *, slots=3):
-    """A weekly Recurring Schedule with no End Date; add its Sessions with `add_session(recurrence_id=...)`."""
+_FIRST_DATE = object()
+
+
+def add_schedule(conn, opportunity_id, first_starts_at: datetime, *, slots=3, until=_FIRST_DATE, days="Weekly"):
+    """A Recurring Schedule; add its Sessions with `add_session(recurrence_id=...)`.
+
+    It ends on its first date unless `until` says otherwise, so reading Sessions
+    doesn't top it up; `until=None` makes it open-ended. The legacy "Weekly" days
+    fall on its first date's weekday; pass e.g. `days="Tue,Sat"` for others.
+    """
     return _insert(conn, "RecurringSchedule", {
         "OpportunityID": opportunity_id,
         "StartDate": first_starts_at.date(),
-        "EndDate": None,
-        "DayFrequency": "Weekly",
+        "EndDate": first_starts_at.date() if until is _FIRST_DATE else until,
+        "DayFrequency": days,
         "StartTime": first_starts_at.time(),
         "EndTime": (first_starts_at + timedelta(hours=1)).time(),
         "DefaultCreatorSlots": slots,
@@ -87,7 +95,7 @@ def add_info(conn, opportunity_id, label, value):
     })
 
 
-def add_application(conn, opportunity_id, session_id, *, status="New"):
+def add_application(conn, opportunity_id, session_id, *, status="New", **columns):
     return _insert(conn, "Application", {
         "OpportunityID": opportunity_id,
         "OriginalSessionID": session_id,
@@ -98,4 +106,5 @@ def add_application(conn, opportunity_id, session_id, *, status="New"):
         "EmailAddress": "creator@example.com",
         "MobileWhatsAppNumber": "+65 9123 4567",
         "SubmissionSnapshot": json.dumps({}),
+        **columns,
     })

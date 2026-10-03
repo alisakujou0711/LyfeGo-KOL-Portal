@@ -6,24 +6,28 @@ reachable only by link. Session days count from Day 0, the first Saturday after
 keeps the weekdays the design shows, and Discover's soonest-first order matches
 the design's order for the week after a reset, whatever day it runs. After Day
 7's Sessions pass, the order drifts; reset again. The demo shows a weekly class,
-Limited Spots, a Filled Session beside open ones, a cancelled Session, a fully
-booked Opportunity and a Closed one.
+a weekly class on two weekdays (the Closed Padel Session), Limited Spots, a Filled Session beside open ones, a
+cancelled Session, a fully booked Opportunity and a Closed one. It also
+creates the demo Admin named in backend/.env (ADMIN_EMAIL / ADMIN_PASSWORD),
+when both are set.
 """
 
 import json
 from datetime import date, datetime, time, timedelta
 
+from app.admins import add_admin
 from app.applications import historical_snapshot
 from app.config import Settings
 from app.db import connect
-from app.opportunities import get_detail
+from app.opportunities import SHORT_WEEKDAYS, get_detail
+from app.schedule import generated_times
 from create_lyfego_db import create_tables
 
 
-# A Recurring Schedule without an End Date exposes this window of future Sessions (FS-ADM-SES-008).
-ROLLING_WINDOW = timedelta(weeks=8)
+DEMO_ADMIN_NAME = "LyfeGo Admin"
 
-SATURDAY = 5  # date.weekday()
+# date.weekday()
+TUESDAY, THURSDAY, SATURDAY = 1, 3, 5
 
 # Unsplash photos at the size the design uses.
 _UNSPLASH = "https://images.unsplash.com/photo-{}?w=800&h=500&fit=crop&auto=format"
@@ -37,16 +41,17 @@ def _session(day, start, end, slots, application_statuses=(), *, cancelled=False
             "statuses": application_statuses, "cancelled": cancelled}
 
 
-def _weekly(weekday, start, end, default_slots, application_statuses_by_week=None):
-    """A weekly Recurring Schedule with no End Date; week `n`'s Session gets one Application per status."""
-    return {"weekday": weekday, "start": start, "end": end, "slots": default_slots,
-            "statuses": application_statuses_by_week or {}}
+def _weekly(weekdays, start, end, default_slots, application_statuses_by_session=None):
+    """A Recurring Schedule on `weekdays` with no End Date; its `n`th Session gets one Application per status."""
+    return {"weekdays": weekdays, "start": start, "end": end, "slots": default_slots,
+            "statuses": application_statuses_by_session or {}}
 
 
-# Text, images, deliverables and "Who this is for" rows come from the design;
-# compensation comes from the teammate's data (Dummy_values.py). Days are
-# chosen so each Opportunity's next Available Session comes after the one
-# before it: Day 0 is a Saturday, Day 1 a Sunday, Day 3 a Tuesday.
+# Text, images, deliverables, "Who this is for" rows and Paid amounts and
+# Payment Bases ("S$150 per post") come from the design; the rest of the
+# compensation comes from the teammate's data (Dummy_values.py). Days are chosen so each Opportunity's next Available
+# Session comes after the one before it: Day 0 is a Saturday, Day 1 a Sunday,
+# Day 3 a Tuesday.
 OPPORTUNITIES = [
     {
         "Title": "Tennis Group Class",
@@ -63,7 +68,7 @@ OPPORTUNITIES = [
         "CompensationType": "Paid",
         "PaidCurrency": "SGD",
         "PaidAmount": 150,
-        "PaidPaymentBasis": "Per completed collaboration",
+        "PaidPaymentBasis": "Per post",
         "CollaborationType": "One-off",
         "DeliverableType": "Fixed",
         "ExperienceSkillLevel": "Beginner",
@@ -78,7 +83,11 @@ OPPORTUNITIES = [
         ],
         "info": [("Equipment", "Racquets can be provided if needed")],
         # Saturdays 8–9pm from Day 0; the second Saturday is Filled.
-        "weekly": [_weekly(SATURDAY, time(20), time(21), 2, {0: ["New"], 1: ["Accepted", "Accepted", "New"]})],
+        "weekly": [_weekly([SATURDAY], time(20), time(21), 2, {0: ["New"], 1: [
+            "Accepted",
+            "Accepted",
+            "New",
+        ]})],
         "sessions": [
             _session(3, time(19), time(20), 3, ["Reviewing"]),
         ],
@@ -130,7 +139,7 @@ OPPORTUNITIES = [
         "CompensationType": "Paid",
         "PaidCurrency": "SGD",
         "PaidAmount": 100,
-        "PaidPaymentBasis": "Per completed collaboration",
+        "PaidPaymentBasis": "Per post",
         "PaidCompensationNote": "Complimentary boxing class",
         "CollaborationType": "One-off",
         "DeliverableType": "Fixed",
@@ -266,7 +275,7 @@ OPPORTUNITIES = [
         "CompensationType": "Paid",
         "PaidCurrency": "SGD",
         "PaidAmount": 200,
-        "PaidPaymentBasis": "Per completed collaboration",
+        "PaidPaymentBasis": "Per post",
         "PaidCompensationNote": "Activewear set (yours to keep)",
         "CollaborationType": "Ongoing",
         "DeliverableType": "Fixed",
@@ -337,7 +346,7 @@ OPPORTUNITIES = [
         "CompensationType": "Paid",
         "PaidCurrency": "SGD",
         "PaidAmount": 150,
-        "PaidPaymentBasis": "Per completed collaboration",
+        "PaidPaymentBasis": "Per post",
         "PaidCompensationNote": "Wellness product bundle (yours to keep)",
         "CollaborationType": "Ongoing",
         "DeliverableType": "Fixed",
@@ -354,9 +363,10 @@ OPPORTUNITIES = [
             ("Min. following", "1,000+ on Instagram or TikTok"),
             ("Content niche", "Wellness, health or lifestyle"),
         ],
+        # The second Session shows no spot count in the Figma: 5 Creator Slots (our choice).
         "sessions": [
             _session(13, time(16), time(17), 4, ["Reviewing"]),
-            _session(20, time(16), time(17), 4),
+            _session(20, time(16), time(17), 5),
         ],
     },
     {
@@ -416,10 +426,10 @@ OPPORTUNITIES = [
         ],
         "info": [("Equipment", "Racquets and balls provided")],
         # Closed by LyfeGo Admin: reachable only by link, whatever its Sessions say.
+        # Tuesdays and Thursdays 6–7:30pm.
         "PublishingStatus": "Closed",
-        "sessions": [
-            _session(4, time(18), time(19, 30), 4, ["New"]),
-        ],
+        "weekly": [_weekly([TUESDAY, THURSDAY], time(18), time(19, 30), 4, {1: ["New"]})],
+        "sessions": [],
     },
 ]
 
@@ -436,6 +446,8 @@ def reset_database(settings: Settings, *, today: date) -> None:
         for opportunity in OPPORTUNITIES:
             _seed_opportunity(conn, opportunity, today)
         conn.commit()
+        if settings.admin_email and settings.admin_password:
+            add_admin(conn, email=settings.admin_email, password=settings.admin_password, name=DEMO_ADMIN_NAME)
     finally:
         conn.close()
 
@@ -506,26 +518,27 @@ def _seed_opportunity(conn, opportunity: dict, today: date) -> None:
 
 
 def _insert_schedule(cursor, opp_id: int, schedule: dict, today: date) -> list[dict]:
-    """Insert a weekly Recurring Schedule starting on its first weekday after today, and return
-    its Sessions for the rolling window, each with its date, the schedule's default Creator Slots
-    and its `recurrence_id`.
+    """Insert a Recurring Schedule starting on its first weekday after today, and return the
+    Sessions the schedule module generates for it (its rolling window), each with its date, the
+    schedule's default Creator Slots and its `recurrence_id`.
     """
-    first = _first_after(today, schedule["weekday"])
+    weekdays = sorted(schedule["weekdays"])
+    first = min(_first_after(today, weekday) for weekday in weekdays)
     recurrence_id = _insert(cursor, "RecurringSchedule", {
         "OpportunityID": opp_id,
         "StartDate": first,
         "EndDate": None,
-        "DayFrequency": "Weekly",
+        "DayFrequency": ",".join(SHORT_WEEKDAYS[weekday] for weekday in weekdays),
         "StartTime": schedule["start"],
         "EndTime": schedule["end"],
         "DefaultCreatorSlots": schedule["slots"],
     })
-    weeks = range((today + ROLLING_WINDOW - first).days // 7 + 1)
+    times = generated_times(weekdays, schedule["start"].strftime("%H:%M"), schedule["end"].strftime("%H:%M"),
+                            first, None, now=datetime.combine(today, time.max))
     return [
-        {"date": first + timedelta(weeks=week), "start": schedule["start"], "end": schedule["end"],
-         "slots": schedule["slots"], "statuses": schedule["statuses"].get(week, ()), "cancelled": False,
-         "recurrence_id": recurrence_id}
-        for week in weeks
+        {"date": day, "start": schedule["start"], "end": schedule["end"], "slots": schedule["slots"],
+         "statuses": schedule["statuses"].get(index, ()), "cancelled": False, "recurrence_id": recurrence_id}
+        for index, (day, _, _) in enumerate(times)
     ]
 
 

@@ -22,3 +22,5 @@ gitcommit*
 .venv
 __pycache__
 .pytest_cache
+# cover images uploaded from the Admin form
+backend/uploads/

@@ -40,6 +40,16 @@ def test_session_is_filled_once_accepted_count_reaches_creator_slots(accepted):
     assert only.slots_left == 0
 
 
+def test_a_session_without_creator_slots_is_never_available():
+    # Only a Draft can have one (to_ask.md A1, D9): it has no room until its slots are set.
+    result = evaluate_availability("Live", [session(slots=None)], now=NOW)
+
+    assert result.state == "fully_booked"
+    [only] = result.sessions
+    assert only.state == "filled"
+    assert only.slots_left == 0
+
+
 @pytest.mark.parametrize(
     "starts_in, expected",
     [

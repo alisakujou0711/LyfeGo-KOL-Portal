@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './pages/**/*.jsx', './javascript/**/*.{js,jsx}'],
+  content: ['./index.html', './creator-portal/**/*.{js,jsx}', './admin-portal/**/*.{js,jsx}'],
   theme: {
     extend: {
       fontFamily: {
@@ -15,9 +15,11 @@ export default {
           100: '#FFF0EB',
         },
         surface: '#F8F7F5',
+        'surface-soft': '#FAFAF9',
         line: '#EEECEA',
         'line-strong': '#E5E4E0',
         'line-soft': '#F0EFED',
+        'line-faint': '#F5F4F2',
       },
       keyframes: {
         'fade-up': {

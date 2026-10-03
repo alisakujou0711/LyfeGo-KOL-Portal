@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator
 
 import mysql.connector
@@ -31,3 +32,9 @@ def get_db(settings: Settings = Depends(get_settings)) -> Iterator[MySQLConnecti
         yield conn
     finally:
         conn.close()
+
+
+def contains_pattern(text: str) -> str:
+    """A LIKE pattern, for use with ESCAPE '\\', matching values that contain
+    `text` with its wildcard characters taken literally."""
+    return "%" + re.sub(r"([\\%_])", r"\\\1", text) + "%"

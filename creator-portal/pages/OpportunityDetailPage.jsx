@@ -10,7 +10,6 @@ import { availableSession, useOpportunity } from '../javascript/hooks/useOpportu
 import {
   compensationLabel,
   formatAmount,
-  formatBasis,
   formatLongDate,
   formatTimeRange,
   visibleExperienceLevels,
@@ -70,7 +69,9 @@ function ReceivedItem({ children }) {
   )
 }
 
-// The BARTER / PAID / PAID + PERK label, then what the creator receives.
+// The BARTER / PAID / PAID + PERK label, then what the creator receives: the
+// amount, e.g. "S$150", with its basis line under it, e.g. "Per post" (our
+// choice, to_ask.md A2).
 function WhatYouReceive({ opportunity }) {
   const { payment } = opportunity
   return (
@@ -86,7 +87,7 @@ function WhatYouReceive({ opportunity }) {
             <span className="font-display text-base font-bold text-gray-900">
               {formatAmount(payment)}
             </span>
-            <p className="text-sm text-gray-400">{formatBasis(payment)}</p>
+            {payment.basis && <p className="text-sm text-gray-400">{payment.basis}</p>}
           </div>
           {payment.note && <ReceivedItem>{payment.note}</ReceivedItem>}
         </>
@@ -153,8 +154,19 @@ function Deliverable({ text }) {
   )
 }
 
+// The signed-in Admin's preview of a Draft (to_ask.md D2): only they get one.
+const DRAFT_NOTICE = 'This draft isn’t visible to creators yet.'
+
 function AvailabilityMeta({ opportunity }) {
   const { availability, limitedSpots } = opportunity
+  if (availability === 'draft') {
+    return (
+      <div className="flex items-center gap-1.5 text-sm font-medium text-gray-500">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0" />
+        Draft preview
+      </div>
+    )
+  }
   if (availability !== 'open') {
     return (
       <div className="flex items-center gap-1.5 text-sm font-medium text-red-500">
@@ -238,16 +250,18 @@ function OpportunityDetail({ opportunity }) {
         </div>
       </div>
 
-      {/* Hero */}
+      {/* Hero: without a cover image, a plain grey area under the same shading. */}
       <div
-        className="relative w-full bg-gray-900 overflow-hidden"
+        className={`relative w-full overflow-hidden ${opportunity.heroImage ? 'bg-gray-900' : 'bg-gray-100'}`}
         style={{ height: 'clamp(220px, 40vw, 460px)' }}
       >
-        <img
-          src={opportunity.heroImage}
-          alt={`${opportunity.title} at ${opportunity.partner}`}
-          className="w-full h-full object-cover opacity-90 animate-fade-in"
-        />
+        {opportunity.heroImage && (
+          <img
+            src={opportunity.heroImage}
+            alt={`${opportunity.title} at ${opportunity.partner}`}
+            className="w-full h-full object-cover opacity-90 animate-fade-in"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
         <div className="absolute bottom-0 left-0 right-0 px-4 sm:px-6 pb-5 pt-12 max-w-6xl mx-auto animate-fade-up">
           <BadgeRow
@@ -374,6 +388,8 @@ function OpportunityDetail({ opportunity }) {
                 <p className="text-sm text-gray-400">Every session of this opportunity is fully booked.</p>
               ) : opportunity.availability === 'closed' ? (
                 <p className="text-sm text-gray-400">This opportunity is no longer accepting registrations.</p>
+              ) : opportunity.availability === 'draft' ? (
+                <p className="text-sm text-gray-400">{DRAFT_NOTICE}</p>
               ) : session ? (
                 <div
                   key={session.id}

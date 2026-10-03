@@ -81,8 +81,8 @@ def test_a_card_lists_the_weekly_classes_that_still_have_an_available_session(cl
     [card] = discover(client)
 
     assert card["weeklyClasses"] == [
-        {"day": "Saturday", "start": "20:00", "end": "21:00"},
-        {"day": "Sunday", "start": "09:00", "end": "10:00"},
+        {"days": ["Saturday"], "start": "20:00", "end": "21:00"},
+        {"days": ["Sunday"], "start": "09:00", "end": "10:00"},
     ]
 
 

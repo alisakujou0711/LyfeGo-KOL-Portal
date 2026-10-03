@@ -4,7 +4,10 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BACKEND_DIR / ".env"
+# Cover images uploaded from the Admin form (git-ignored).
+UPLOADS_DIR = BACKEND_DIR / "uploads"
 REQUIRED_KEYS = ("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME")
 
 
@@ -15,10 +18,14 @@ class Settings:
     db_user: str
     db_password: str
     db_name: str
+    # The demo Admin a database reset creates; optional so the API runs without them.
+    admin_email: str | None = None
+    admin_password: str | None = None
+    uploads_dir: Path = UPLOADS_DIR
 
 
 def load_settings(env_file: Path = ENV_FILE) -> Settings:
-    """Read database settings from the env file only (never the process env)."""
+    """Read settings from the env file only (never the process env)."""
     if not env_file.exists():
         raise RuntimeError(
             f"{env_file} not found. Copy backend/.env.example to backend/.env and fill it in."
@@ -33,6 +40,8 @@ def load_settings(env_file: Path = ENV_FILE) -> Settings:
         db_user=values["DB_USER"],
         db_password=values["DB_PASSWORD"],
         db_name=values["DB_NAME"],
+        admin_email=values.get("ADMIN_EMAIL") or None,
+        admin_password=values.get("ADMIN_PASSWORD") or None,
     )
 
 

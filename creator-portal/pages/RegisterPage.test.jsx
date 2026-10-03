@@ -96,8 +96,8 @@ describe('Registering for an opportunity', () => {
           payment: {
             currency: 'SGD',
             amount: 150,
-            basis: 'Per completed collaboration',
-            note: 'Complimentary tennis class',
+            basis: 'Per post',
+            note: 'Activewear set',
           },
         }),
       },
@@ -107,8 +107,22 @@ describe('Registering for an opportunity', () => {
     expect(screen.getByText(/Saturday, 26 September/)).toBeInTheDocument()
     expect(screen.getByText('Kallang')).toBeInTheDocument()
     expect(
-      screen.getByText('S$150 per completed collaboration + Complimentary tennis class'),
+      screen.getByText('S$150 · Per post + Activewear set'),
     ).toBeInTheDocument()
+  })
+
+  it('summarises a Paid amount without a basis or note as just the amount', async () => {
+    await openForm({
+      api: {
+        'GET /api/opportunities/1': detail({
+          compensationType: 'Paid',
+          whatCreatorReceives: null,
+          payment: { currency: 'SGD', amount: 150, basis: null, note: null },
+        }),
+      },
+    })
+
+    expect(screen.getByText('S$150')).toBeInTheDocument()
   })
 
   it('submits the Application and confirms only once the API has stored it', async () => {

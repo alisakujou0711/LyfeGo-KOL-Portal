@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
+from app.admins import add_admin
 from app.clock import now_sgt
 from app.config import get_settings, load_settings
 from app.db import connect
@@ -15,9 +16,10 @@ TEST_DB_NAME = "lyfego_test"
 
 
 @pytest.fixture(scope="session")
-def test_settings():
-    """Settings from backend/.env, pointed at a freshly recreated test database."""
-    settings = replace(load_settings(), db_name=TEST_DB_NAME)
+def test_settings(tmp_path_factory):
+    """Settings from backend/.env, pointed at a freshly recreated test database and
+    an empty uploads folder."""
+    settings = replace(load_settings(), db_name=TEST_DB_NAME, uploads_dir=tmp_path_factory.mktemp("uploads"))
     conn = connect(settings, select_database=False)
     try:
         cursor = conn.cursor()
@@ -62,3 +64,26 @@ def at():
         app.dependency_overrides[now_sgt] = lambda: now
 
     return freeze
+
+
+@pytest.fixture
+def sign_in(client, test_settings):
+    """`sign_in()` adds an Admin and signs `client` in as them."""
+
+    def sign_in_as_admin():
+        conn = connect(test_settings)
+        try:
+            add_admin(conn, email="staff@lyfego.test", password="correct horse battery", name="Staff")
+        finally:
+            conn.close()
+        response = client.post("/api/admin/session",
+                               json={"email": "staff@lyfego.test", "password": "correct horse battery"})
+        assert response.status_code == 200
+
+    return sign_in_as_admin
+
+
+@pytest.fixture
+def signed_in(db, sign_in):
+    """Signs `client` in as an Admin (after `db` has emptied the tables)."""
+    sign_in()

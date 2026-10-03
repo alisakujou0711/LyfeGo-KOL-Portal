@@ -1,13 +1,13 @@
 import { BadgeRow } from './Badge'
 import { CalendarIcon, DollarIcon, GiftIcon, MapPinIcon } from './Icons'
-import { formatAmount, formatBasis, formatLongDate, formatTimeRange, shorten } from '../lib/format'
+import { formatLongDate, formatPayment, formatTimeRange, shorten } from '../lib/format'
 
-// "S$150 per completed collaboration + Activewear set", or what a Barter
-// creator receives.
+// "S$150 · Per post + Activewear set" (our choice, to_ask.md D6), or what a
+// Barter creator receives.
 function compensationLine(opportunity) {
   const { payment } = opportunity
   if (!payment) return shorten(opportunity.whatCreatorReceives)
-  const line = `${formatAmount(payment)} ${formatBasis(payment)}`
+  const line = formatPayment(payment)
   return payment.note ? `${line} + ${payment.note}` : line
 }
 

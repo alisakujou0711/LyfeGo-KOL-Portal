@@ -25,11 +25,13 @@ MAX_NOTE_LENGTH = 5000
 
 
 class Conflict(Exception):
-    """The Opportunity or Session can no longer be applied for; the message is creator-readable."""
+    """The request can't be done in the data's current state, e.g. the Session can no longer be
+    applied for or accepted into; the message is readable by whoever made the request (409)."""
 
 
 class Invalid(Exception):
-    """The submission has invalid fields: `errors` maps each field to a creator-readable message."""
+    """The request has invalid fields: `errors` maps each field to a message readable by
+    whoever made the request (422)."""
 
     def __init__(self, errors: dict[str, str]):
         super().__init__(errors)
@@ -78,6 +80,26 @@ def _validated(body: dict) -> dict:
     if not ID_RE.fullmatch(values["sessionId"]):
         errors["sessionId"] = "Please choose a session"
 
+    errors.update(contact_errors(values))
+
+    if len(values["note"]) > MAX_NOTE_LENGTH:
+        errors["note"] = f"Note must be {MAX_NOTE_LENGTH} characters or fewer"
+
+    if not values["submissionKey"]:
+        errors["submissionKey"] = "Submission key is required"
+    elif len(values["submissionKey"]) > 64:
+        errors["submissionKey"] = "Submission key must be 64 characters or fewer"
+
+    if errors:
+        raise Invalid(errors)
+    return values
+
+
+def contact_errors(values: dict[str, str]) -> dict[str, str]:
+    """The register form's rules for the creator's contact details (fullName,
+    instagram, tiktok, email, phone, each trimmed): a message per invalid field.
+    Admin corrections follow the same rules (FS-ADM-APP-023)."""
+    errors = {}
     if not values["fullName"]:
         errors["fullName"] = "Full name is required"
     elif len(values["fullName"]) > 255:
@@ -104,18 +126,7 @@ def _validated(body: dict) -> dict:
         errors["phone"] = "Mobile number is required"
     elif not PHONE_RE.fullmatch(values["phone"]) or len(re.sub(r"[^0-9]", "", values["phone"])) < 8:
         errors["phone"] = "Please enter a valid mobile number"
-
-    if len(values["note"]) > MAX_NOTE_LENGTH:
-        errors["note"] = f"Note must be {MAX_NOTE_LENGTH} characters or fewer"
-
-    if not values["submissionKey"]:
-        errors["submissionKey"] = "Submission key is required"
-    elif len(values["submissionKey"]) > 64:
-        errors["submissionKey"] = "Submission key must be 64 characters or fewer"
-
-    if errors:
-        raise Invalid(errors)
-    return values
+    return errors
 
 
 def _application_with_key(conn, submission_key: str) -> str | None:

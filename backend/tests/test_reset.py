@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 import pytest
 
+from app.admins import add_admin
 from app.db import connect
 from app.seed import reset_database
 
@@ -74,6 +75,24 @@ def test_discover_shows_the_nine_design_opportunities_in_order_and_the_extras_on
     assert _detail(client, seeded, "Padel Session")["availability"] == "closed"
 
 
+def test_the_admin_list_shows_the_nine_design_opportunities_in_order_then_the_link_only_two(
+        client, seeded, test_settings):
+    conn = connect(test_settings)
+    try:
+        add_admin(conn, email="list@lyfego.test", password="list password", name="List Admin")
+    finally:
+        conn.close()
+    client.post("/api/admin/session", json={"email": "list@lyfego.test", "password": "list password"})
+
+    listed = client.get("/api/admin/opportunities").json()
+
+    assert [row["title"] for row in listed["opportunities"]] == [
+        *DISCOVER_ORDER, "Yoga Flow with Sublime", "Padel Session"]
+    [applications] = _query(test_settings, "SELECT COUNT(*) AS n FROM Application")
+    assert listed["counts"] == {
+        "total": 11, "live": 10, "draft": 0, "closed": 1, "applications": applications["n"]}
+
+
 def test_tennis_has_a_saturday_weekly_class_and_a_one_off_tuesday(client, seeded, test_settings):
     tennis = _detail(client, seeded, "Tennis Group Class")
     [weekly] = tennis["weeklyClasses"]
@@ -83,7 +102,7 @@ def test_tennis_has_a_saturday_weekly_class_and_a_one_off_tuesday(client, seeded
                        (schedule["RecurrenceID"],))
 
     assert _cards(client)["Tennis Group Class"]["weeklyClasses"] == [
-        {"day": "Saturday", "start": "20:00", "end": "21:00"},
+        {"days": ["Saturday"], "start": "20:00", "end": "21:00"},
     ]
     assert [s["date"] for s in weekly["sessions"]] == [
         "2026-09-26", "2026-10-03", "2026-10-10", "2026-10-17",
@@ -93,6 +112,21 @@ def test_tennis_has_a_saturday_weekly_class_and_a_one_off_tuesday(client, seeded
     assert [(s["date"], s["start"], s["end"]) for s in tennis["sessions"]] == [("2026-09-29", "19:00", "20:00")]
     assert schedule["EndDate"] is None
     assert {row["CreatorSlots"] for row in generated} == {schedule["DefaultCreatorSlots"]}
+
+
+def test_padel_has_a_weekly_class_on_two_weekdays(client, seeded, test_settings, sign_in):
+    sign_in()
+    padel = seeded["Padel Session"]
+    loaded = client.get(f"/api/admin/opportunities/{padel}").json()
+    stored = _query(test_settings, "SELECT SessionDate FROM Session WHERE OpportunityID = %s", (padel,))
+
+    assert loaded["recurring"] == {"days": ["Tue", "Thu"], "start": "18:00", "end": "19:30",
+                                   "startDate": "2026-09-24", "endDate": None, "slots": 4}
+    [row] = [row for row in client.get("/api/admin/opportunities").json()["opportunities"] if row["id"] == str(padel)]
+    assert row["schedule"]["weeklyClasses"] == [{"days": ["Tuesday", "Thursday"], "start": "18:00", "end": "19:30"}]
+    # Eight weeks of Tuesdays and Thursdays, which reading doesn't add to.
+    assert len(stored) == 16
+    assert {row["SessionDate"].strftime("%a") for row in stored} == {"Tue", "Thu"}
 
 
 def test_sessions_fall_on_the_weekdays_the_design_shows(client, seeded):
@@ -118,18 +152,23 @@ def test_seed_covers_every_creator_facing_situation(client, seeded, test_setting
     assert len(_detail(client, seeded, "Recovery Experience")["sessions"]) == 1  # the cancelled one is hidden
 
 
-def test_paid_values_come_from_the_teammates_data(client, seeded):
+def test_paid_amounts_are_the_designs_amount_and_basis_and_keep_the_teammates_note(client, seeded):
     paid = {title: card["payment"] for title, card in _cards(client).items() if card["compensationType"] == "Paid"}
 
     assert {title: (p["currency"], p["amount"], p["basis"], p["note"]) for title, p in paid.items()} == {
-        "Tennis Group Class": ("SGD", 150, "Per completed collaboration", None),
-        "Boxing Class Creator Experience": (
-            "SGD", 100, "Per completed collaboration", "Complimentary boxing class"),
-        "Activewear Creator Campaign": (
-            "SGD", 200, "Per completed collaboration", "Activewear set (yours to keep)"),
-        "Wellness Product Creator Campaign": (
-            "SGD", 150, "Per completed collaboration", "Wellness product bundle (yours to keep)"),
+        "Tennis Group Class": ("SGD", 150, "Per post", None),
+        "Boxing Class Creator Experience": ("SGD", 100, "Per post", "Complimentary boxing class"),
+        "Activewear Creator Campaign": ("SGD", 200, "Per post", "Activewear set (yours to keep)"),
+        "Wellness Product Creator Campaign": ("SGD", 150, "Per post", "Wellness product bundle (yours to keep)"),
     }
+
+
+def test_every_session_and_recurring_schedule_has_creator_slots(client, seeded, test_settings):
+    unset = _query(test_settings, "SELECT SessionID FROM Session WHERE CreatorSlots IS NULL")
+    unset_defaults = _query(test_settings, "SELECT RecurrenceID FROM RecurringSchedule WHERE DefaultCreatorSlots IS NULL")
+
+    assert (unset, unset_defaults) == ([], [])
+    assert [s["slotsLeft"] for s in _detail(client, seeded, "Wellness Product Creator Campaign")["sessions"]] == [4, 5]
 
 
 def test_every_live_opportunity_has_the_fields_live_requires(client, seeded):

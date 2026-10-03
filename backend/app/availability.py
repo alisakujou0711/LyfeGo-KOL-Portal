@@ -35,7 +35,7 @@ class OpportunityState(StrEnum):
 class Session:
     id: int
     starts_at: datetime
-    creator_slots: int
+    creator_slots: int | None  # None: not set yet, only on a Draft (to_ask.md A1); never Available
     accepted_count: int
     is_cancelled: bool
 
@@ -51,6 +51,7 @@ class SessionAvailability:
 class OpportunityAvailability:
     state: OpportunityState
     sessions: tuple[SessionAvailability, ...]
+    slots_left: int  # across the Available Sessions
     limited_spots: bool
     next_available_session: SessionAvailability | None
     more_sessions_count: int
@@ -66,7 +67,7 @@ def evaluate_availability(
     Raises ValueError for an unknown Publishing Status.
     """
     status = PublishingStatus(publishing_status)
-    evaluated = tuple(_evaluate_session(s, now) for s in sessions)
+    evaluated = tuple(evaluate_session(s, now) for s in sessions)
     state = _opportunity_state(status, evaluated)
     available = sorted(
         (s for s in evaluated if s.state == SessionState.AVAILABLE),
@@ -76,6 +77,7 @@ def evaluate_availability(
     return OpportunityAvailability(
         state=state,
         sessions=evaluated,
+        slots_left=slots_left,
         limited_spots=bool(available) and slots_left <= LIMITED_SPOTS_THRESHOLD,
         next_available_session=available[0] if available else None,
         more_sessions_count=max(len(available) - 1, 0),
@@ -97,8 +99,9 @@ def _opportunity_state(
     return OpportunityState.FULLY_BOOKED
 
 
-def _evaluate_session(session: Session, now: datetime) -> SessionAvailability:
-    slots_left = max(session.creator_slots - session.accepted_count, 0)
+def evaluate_session(session: Session, now: datetime) -> SessionAvailability:
+    """One Session's state at `now`, whatever its Opportunity's Publishing Status."""
+    slots_left = max((session.creator_slots or 0) - session.accepted_count, 0)
     if session.is_cancelled:
         state = SessionState.CANCELLED
     elif session.starts_at <= now:

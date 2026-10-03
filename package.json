@@ -8,6 +8,7 @@
     "dev:web": "vite",
     "dev:api": "python -m uvicorn app.main:app --reload --reload-dir backend --port 8000 --app-dir backend",
     "db:reset": "python backend/reset_db.py",
+    "admin": "python backend/manage_admins.py",
     "build": "vite build",
     "preview": "vite preview",
     "test": "npm run test:web && npm run test:api",

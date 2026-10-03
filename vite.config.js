@@ -13,6 +13,6 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    setupFiles: ['./javascript/test/setup.js'],
+    setupFiles: ['./creator-portal/javascript/test/setup.js'],
   },
 })

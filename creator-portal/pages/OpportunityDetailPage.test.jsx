@@ -66,7 +66,7 @@ const PAID = detail({
 // Saturdays 8–9pm from 26 Sep for seven weeks; the second is Filled.
 const SATURDAYS = {
   id: '3',
-  day: 'Saturday',
+  days: ['Saturday'],
   start: '20:00',
   end: '21:00',
   sessions: ['26', '03', '10', '17', '24', '31'].map((day, i) =>
@@ -133,6 +133,14 @@ describe('Opportunity detail', () => {
     expectShown('Kallang')
   })
 
+  it('shows the plain image area, and no broken image, when there is no cover image', async () => {
+    renderDetail(detail({ heroImage: null }))
+
+    await findTitle()
+    expect(screen.queryByRole('img', { name: /Tennis Group Class/ })).not.toBeInTheDocument()
+    expectShown('Kallang Tennis Centre')
+  })
+
   it('shows no Location when there is no venue or address', async () => {
     renderDetail(detail({ area: 'Singapore', venueName: null, fullAddress: null }))
 
@@ -158,7 +166,7 @@ describe('Opportunity detail', () => {
     for (const card of sidebarCards('What You Receive')) {
       expect(within(card).getByText('Paid + Perk')).toBeInTheDocument()
       expect(within(card).getByText('S$150')).toBeInTheDocument()
-      expect(within(card).getByText('per completed collaboration')).toBeInTheDocument()
+      expect(within(card).getByText('Per completed collaboration')).toBeInTheDocument()
       expect(within(card).getByText('Activewear set (yours to keep)')).toBeInTheDocument()
     }
   })
@@ -171,6 +179,26 @@ describe('Opportunity detail', () => {
       expect(within(card).getByText('Paid')).toBeInTheDocument()
       expect(within(card).queryByText('Paid + Perk')).not.toBeInTheDocument()
       expect(within(card).getByText('S$150')).toBeInTheDocument()
+    }
+  })
+
+  it('shows a US dollar amount with its cents only when it has some', async () => {
+    renderDetail({ ...PAID, payment: { ...PAID.payment, currency: 'USD', amount: 1080.5 } })
+
+    await findTitle('Activewear Campaign')
+    for (const card of sidebarCards('What You Receive')) {
+      expect(within(card).getByText('US$1,080.50')).toBeInTheDocument()
+    }
+  })
+
+  it('shows no basis line for a Paid opportunity without one (only a Draft may have none)', async () => {
+    renderDetail({ ...PAID, payment: { ...PAID.payment, basis: null } })
+
+    await findTitle('Activewear Campaign')
+    for (const card of sidebarCards('What You Receive')) {
+      expect(within(card).getByText('S$150')).toBeInTheDocument()
+      expect(within(card).queryByText(/per completed collaboration/i)).not.toBeInTheDocument()
+      expect(within(card).getByText('Paid + Perk')).toBeInTheDocument()
     }
   })
 
@@ -263,6 +291,7 @@ describe('Opportunity detail', () => {
     expect(filled).toBeDisabled()
   })
 
+
   it('groups weekly classes and one-off sessions under headings when both exist', async () => {
     renderDetail(detail({ weeklyClasses: [SATURDAYS] }))
 
@@ -306,6 +335,14 @@ describe('Opportunity detail', () => {
     await user.click(screen.getByRole('button', { name: '+2 more' }))
     expect(screen.getAllByRole('radio')).toHaveLength(7)
     expect(screen.queryByRole('button', { name: /more/ })).not.toBeInTheDocument()
+  })
+
+  it('names every weekday of a weekly class on several days', async () => {
+    renderDetail(detail({ weeklyClasses: [{ ...SATURDAYS, days: ['Tuesday', 'Saturday'] }], sessions: [] }))
+
+    await findTitle()
+    const weekly = screen.getByRole('button', { name: /Every Tue & Sat/ })
+    expect(weekly).toHaveTextContent('8:00 PM – 9:00 PM')
   })
 
   it('registers for a chosen weekly class date like any session', async () => {
@@ -395,6 +432,17 @@ describe('Opportunity detail', () => {
     expectShown('Closed')
     for (const button of registerButtons()) expect(button).toBeDisabled()
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
+  })
+
+  it('shows a signed-in Admin’s Draft preview with its sessions, and disables Register', async () => {
+    renderDetail(detail({ availability: 'draft', nextSession: null, moreSessionsCount: 0 }))
+
+    await findTitle()
+    expectShown('Draft preview')
+    expectShown('This draft isn’t visible to creators yet.')
+    expect(screen.queryByText('Closed')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('radio').length).toBeGreaterThan(0)
+    for (const button of registerButtons()) expect(button).toBeDisabled()
   })
 
   it('shows the not-found page for a Draft or unknown opportunity', async () => {

@@ -94,6 +94,14 @@ describe('Discover', () => {
     expect(activewear.queryByText(/activewear set/)).not.toBeInTheDocument()
   })
 
+  it('shows the plain image area, and no broken image, when there is no cover image', async () => {
+    renderRoute('/', { api: { 'GET /api/opportunities': [card({ heroImage: null })] } })
+
+    const tennis = within(await findCard('Tennis Group Class'))
+    expect(tennis.queryByRole('img')).not.toBeInTheDocument()
+    expect(tennis.getByText('Sport')).toBeInTheDocument()
+  })
+
   it('hides the Level row when the level is Not Applicable', async () => {
     renderRoute('/', { api: { 'GET /api/opportunities': [PAID] } })
 
@@ -128,8 +136,8 @@ describe('Discover', () => {
             moreSessionsCount: 3,
             availableDates: ['2026-09-24', '2026-09-26', '2026-09-27', '2026-10-03'],
             weeklyClasses: [
-              { day: 'Saturday', start: '20:00', end: '21:00' },
-              { day: 'Sunday', start: '09:30', end: '10:30' },
+              { days: ['Saturday'], start: '20:00', end: '21:00' },
+              { days: ['Sunday'], start: '09:30', end: '10:30' },
             ],
           }),
         ],
@@ -139,6 +147,26 @@ describe('Discover', () => {
     const tennis = within(await findCard('Tennis Group Class'))
     expect(tennis.getByText('Weekly · Sat 8–9pm')).toBeInTheDocument()
     expect(tennis.queryByText('Multiple dates available')).not.toBeInTheDocument()
+  })
+
+  it('names every weekday of a weekly class on several days', async () => {
+    renderRoute('/', {
+      api: {
+        'GET /api/opportunities': [
+          card({ id: '1', weeklyClasses: [{ days: ['Tuesday', 'Saturday'], start: '20:00', end: '21:00' }] }),
+          card({
+            id: '2',
+            title: 'Reformer Pilates Experience',
+            weeklyClasses: [{ days: ['Monday', 'Wednesday', 'Friday'], start: '07:30', end: '08:30' }],
+          }),
+        ],
+      },
+    })
+
+    expect(within(await findCard('Tennis Group Class')).getByText('Weekly · Tue & Sat 8–9pm')).toBeInTheDocument()
+    expect(
+      within(await findCard('Reformer Pilates Experience')).getByText('Weekly · Mon, Wed & Fri 7:30–8:30am'),
+    ).toBeInTheDocument()
   })
 
   it('says multiple dates are available when they fall on different weekdays', async () => {

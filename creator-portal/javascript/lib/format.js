@@ -65,6 +65,12 @@ export function formatCardDate(iso) {
   return `${SHORT_WEEKDAYS[d.getDay()]}, ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`
 }
 
+// "14 Sep 2026"
+export function formatDayMonthYear(iso) {
+  const d = parseDate(iso)
+  return `${d.getDate()} ${SHORT_MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
+
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 // "8pm", "8:30am"
@@ -81,14 +87,23 @@ function compactTimeRange({ start, end }) {
   return from.slice(-2) === to.slice(-2) ? `${from.slice(0, -2)}–${to}` : `${from}–${to}`
 }
 
+// A weekly class's days (full weekday names, Monday first): "Saturday", or
+// shortened when there are several, "Tue & Sat", "Mon, Wed & Fri" (to_ask.md D5).
+// `short` shortens a single day too: "Sat".
+export function formatWeeklyDays(days, { short = false } = {}) {
+  if (days.length === 1 && !short) return days[0]
+  const names = days.map((day) => day.slice(0, 3))
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} & ${names.at(-1)}`
+}
+
 // A Discover card's schedule line: the first weekly class, e.g.
-// "Weekly · Sat 8–9pm"; "Saturdays from 26 Sep" when every available date
-// falls on one weekday, "Multiple dates available" when they don't, else the
-// next Session, e.g. "Thu, 24 Sep · 10:00 AM".
+// "Weekly · Sat 8–9pm" or "Weekly · Tue & Sat 8–9pm"; "Saturdays from 26 Sep"
+// when every available date falls on one weekday, "Multiple dates available"
+// when they don't, else the next Session, e.g. "Thu, 24 Sep · 10:00 AM".
 export function formatSchedule({ nextSession, availableDates, weeklyClasses }) {
   if (weeklyClasses.length > 0) {
     const [weekly] = weeklyClasses
-    return `Weekly · ${weekly.day.slice(0, 3)} ${compactTimeRange(weekly)}`
+    return `Weekly · ${formatWeeklyDays(weekly.days, { short: true })} ${compactTimeRange(weekly)}`
   }
   if (availableDates.length < 2) return `${formatCardDate(nextSession.date)} · ${formatTime(nextSession.start)}`
   const weekdays = new Set(availableDates.map((iso) => parseDate(iso).getDay()))
@@ -97,18 +112,21 @@ export function formatSchedule({ nextSession, availableDates, weeklyClasses }) {
   return `${WEEKDAYS[first.getDay()]}s from ${first.getDate()} ${SHORT_MONTHS[first.getMonth()]}`
 }
 
-const CURRENCY_SYMBOLS = { SGD: 'S$' }
+const CURRENCY_SYMBOLS = { SGD: 'S$', USD: 'US$' }
 
-// "S$150", "S$200.50", "USD 80"
+// A Payment's amount, e.g. "S$150" or "US$1,080.50": cents only when it has
+// some (our choice, to_ask.md A2); empty when it has none yet (a Draft).
 export function formatAmount({ currency, amount }) {
-  const figure = Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
-  const symbol = CURRENCY_SYMBOLS[currency]
-  return symbol ? `${symbol}${figure}` : `${currency} ${figure}`
+  if (amount === null || amount === undefined) return ''
+  const cents = Number.isInteger(amount) ? 0 : 2
+  const digits = amount.toLocaleString('en-US', { minimumFractionDigits: cents, maximumFractionDigits: cents })
+  return `${CURRENCY_SYMBOLS[currency] ?? ''}${digits}`
 }
 
-// "per completed collaboration", "per post", "flat fee"
-export function formatBasis({ basis }) {
-  return basis.toLowerCase()
+// "S$150 · Per post": the amount and its Payment Basis, leaving out either when
+// it's missing (only a Draft may have none).
+export function formatPayment(payment) {
+  return [formatAmount(payment), payment.basis].filter(Boolean).join(' · ')
 }
 
 // Barter, Paid, or Paid + Perk when a Paid Opportunity has a compensation note

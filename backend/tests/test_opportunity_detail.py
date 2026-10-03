@@ -101,6 +101,16 @@ def test_a_paid_opportunity_discloses_its_payment(client, db):
     assert body["additionalInfo"] == []
 
 
+def test_a_paid_amount_has_decimals_only_when_it_needs_them(client, db):
+    whole = add_opportunity(db, PAID, PaidAmount="80.00", PaidCurrency="USD", PaidCompensationNote=None)
+    cents = add_opportunity(db, PAID, PaidAmount="80.50")
+    add_session(db, whole, TOMORROW_10AM)
+    add_session(db, cents, TOMORROW_10AM)
+
+    assert detail(client, whole)["payment"] == {"currency": "USD", "amount": 80, "basis": "Flat fee", "note": None}
+    assert detail(client, cents)["payment"]["amount"] == 80.5
+
+
 def test_lists_only_upcoming_non_cancelled_sessions_soonest_first(client, db):
     opp = add_opportunity(db)
     later = add_session(db, opp, TOMORROW_10AM + timedelta(days=2), slots=4)
@@ -154,7 +164,7 @@ def test_splits_listed_sessions_into_weekly_classes_and_one_off_sessions(client,
     assert body["weeklyClasses"] == [
         {
             "id": str(saturdays),
-            "day": "Saturday",
+            "days": ["Saturday"],
             "start": "20:00",
             "end": "21:00",
             "sessions": [
@@ -166,7 +176,7 @@ def test_splits_listed_sessions_into_weekly_classes_and_one_off_sessions(client,
         },
         {
             "id": str(sundays),
-            "day": "Sunday",
+            "days": ["Sunday"],
             "start": "09:00",
             "end": "10:00",
             "sessions": [

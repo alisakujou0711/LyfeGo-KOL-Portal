@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CheckIcon, ChevronDownIcon } from './Icons'
-import { formatCardDate, formatLongDate, formatTimeRange } from '../lib/format'
+import { formatCardDate, formatLongDate, formatTimeRange, formatWeeklyDays } from '../lib/format'
 
 // A weekly class shows this many dates before "+N more".
 const VISIBLE_DATES = 5
@@ -126,7 +126,7 @@ function WeeklyClass({ weekly, selectedId, onChoose }) {
   const [showAll, setShowAll] = useState(selectedIndex >= VISIBLE_DATES)
   const shown = showAll ? weekly.sessions : weekly.sessions.slice(0, VISIBLE_DATES)
   const hidden = weekly.sessions.length - shown.length
-  const label = `Every ${weekly.day}`
+  const label = `Every ${formatWeeklyDays(weekly.days)}`
 
   return (
     <div
