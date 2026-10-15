@@ -11,6 +11,7 @@ import { useApiQuery } from '../javascript/hooks/useApiQuery'
 import {
   CATEGORIES,
   closeOpportunity,
+  COLLABORATION_TYPES,
   deleteOpportunity,
   duplicateOpportunity,
   fieldErrorsOf,
@@ -26,12 +27,7 @@ const FILTERS = [
   { name: 'status', label: 'Status', all: 'All statuses', options: ['Live', 'Draft', 'Closed'] },
   { name: 'category', label: 'Category', all: 'All categories', options: CATEGORIES },
   { name: 'compensation', label: 'Compensation', all: 'All compensation', options: ['Paid', 'Barter'] },
-  {
-    name: 'collaborationType',
-    label: 'Collab type',
-    all: 'All collab types',
-    options: ['One-off', 'Ongoing', ['One-off or Ongoing', 'One-off or ongoing']],
-  },
+  { name: 'collaborationType', label: 'Collab type', all: 'All collab types', options: COLLABORATION_TYPES },
 ]
 
 const SUMMARY = [

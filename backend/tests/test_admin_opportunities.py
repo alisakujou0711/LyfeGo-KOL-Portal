@@ -118,12 +118,10 @@ def test_search_treats_wildcard_characters_as_text(client, db, signed_in):
     ("category", "Lifestyle", ["Closed lifestyle paid", "Live lifestyle barter"]),
     ("compensation", "Paid", ["Closed lifestyle paid"]),
     ("collaborationType", "Ongoing", ["Live lifestyle barter"]),
-    ("collaborationType", "One-off or Ongoing", ["Closed lifestyle paid"]),
 ])
 def test_each_filter_narrows_the_list(client, db, signed_in, param, value, expected):
     add_opportunity(db, Title="Draft sport barter", PublishingStatus="Draft")
-    add_opportunity(db, PAID, Title="Closed lifestyle paid", PublishingStatus="Closed",
-                    CollaborationType="One-off or Ongoing")
+    add_opportunity(db, PAID, Title="Closed lifestyle paid", PublishingStatus="Closed")
     add_opportunity(db, Title="Live lifestyle barter", Category="Lifestyle", CollaborationType="Ongoing")
 
     assert titles(client, **{param: value}) == expected

@@ -68,7 +68,6 @@ const COFFEE = row({
   title: 'Specialty Coffee Experience for Two',
   partner: 'Kurasu Singapore',
   category: 'Lifestyle',
-  collaborationType: 'One-off or Ongoing',
   schedule: {
     nextSession: { date: '2026-09-24', start: '10:00', end: '11:00' },
     availableDates: ['2026-09-24'],
@@ -170,7 +169,7 @@ describe('Admin Opportunities list', () => {
       '14 Sep 2026',
     ])
     expect(within(await rowFor('Reformer Pilates Experience')).getByText('Complimentary reformer class')).toBeInTheDocument()
-    expect(within(await rowFor('Specialty Coffee Experience for Two')).getByText('One-off or Ongoing')).toBeInTheDocument()
+    expect(within(await rowFor('Activewear Creator Campaign')).getByText('Ongoing')).toBeInTheDocument()
   })
 
   it('words the schedule like the Creator Portal cards, and leaves it blank without Sessions', async () => {
@@ -238,7 +237,7 @@ describe('Admin Opportunities list', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Lifestyle')
     expect(await screen.findByText('Showing 2 of 5 opportunities')).toBeInTheDocument()
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Collab type' }), 'One-off or ongoing')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Collab type' }), 'One-off')
     expect(await screen.findByText('Showing 1 of 5 opportunities')).toBeInTheDocument()
     expect(bodyRows()).toHaveLength(1)
     expect(screen.getByText('Specialty Coffee Experience for Two')).toBeInTheDocument()
@@ -246,7 +245,7 @@ describe('Admin Opportunities list', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Search opportunities or partners' }), 'tennis')
     expect(await screen.findByText('Showing 0 of 5 opportunities')).toBeInTheDocument()
     expect(screen.getByText('No opportunities match the current filters')).toBeInTheDocument()
-    expect(queries.at(-1)).toEqual({ category: 'Lifestyle', collaborationType: 'One-off or Ongoing', search: 'tennis' })
+    expect(queries.at(-1)).toEqual({ category: 'Lifestyle', collaborationType: 'One-off', search: 'tennis' })
   })
 
   it('filters by status and compensation', async () => {

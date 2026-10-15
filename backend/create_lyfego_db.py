@@ -28,7 +28,7 @@ TABLES = [
             PaidPaymentBasis ENUM('Per completed collaboration', 'Per post', 'Flat fee'),
             PaidCompensationNote TEXT,
             BarterDescription TEXT,
-            CollaborationType ENUM('One-off', 'One-off or Ongoing', 'Ongoing') NOT NULL,
+            CollaborationType ENUM('One-off', 'Ongoing') NOT NULL,
             DeliverableType ENUM('Fixed', 'Flexible') NOT NULL,
             DeliverableNote TEXT,
             ExperienceSkillLevel VARCHAR(100) NOT NULL,

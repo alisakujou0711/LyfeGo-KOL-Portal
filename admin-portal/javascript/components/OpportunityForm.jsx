@@ -335,7 +335,7 @@ function ImageField({ value, error, uploading, onUploading, onChange }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <FieldLabel htmlFor={id} label="Hero / Cover Image" />
+      <FieldLabel htmlFor={id} label="Hero / Cover Image" optional />
       <div className="flex flex-col gap-2.5">
         {value && (
           <div className="relative w-full h-44 rounded-xl overflow-hidden bg-gray-100">

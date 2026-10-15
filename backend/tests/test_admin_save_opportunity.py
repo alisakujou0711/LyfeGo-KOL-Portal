@@ -263,6 +263,7 @@ def test_each_save_returns_a_new_version_for_the_next_save(client, db, signed_in
     ({"compensationType": "Equity"}, "compensationType"),
     ({"currency": "EUR"}, "currency"),
     ({"collaborationType": "Forever"}, "collaborationType"),
+    ({"collaborationType": "One-off or Ongoing"}, "collaborationType"),  # removed; to_ask.md B1
     ({"deliverableType": "Maybe"}, "deliverableType"),
     ({"experienceLevels": "Beginner"}, "experienceLevels"),
     ({"experienceLevels": []}, "experienceLevels"),

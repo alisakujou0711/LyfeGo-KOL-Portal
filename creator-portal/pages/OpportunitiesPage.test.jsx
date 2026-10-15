@@ -279,7 +279,6 @@ describe('Discover filters', () => {
       whatCreatorReceives: null,
       payment: { currency: 'SGD', amount: 200, basis: 'Per post', note: null },
       area: 'Marina Bay',
-      collaborationType: 'One-off or Ongoing',
     }),
     listed(['2026-09-12', '2026-09-13', '2026-09-14'], {
       id: '4',
@@ -486,7 +485,6 @@ describe('Discover filters', () => {
       'Any',
       'One-off',
       'Ongoing',
-      'One-off or ongoing',
     ])
     const deliverables = screen.getByRole('combobox', { name: 'Deliverables' })
     expect(within(deliverables).getAllByRole('option').map((o) => o.textContent)).toEqual([
@@ -495,12 +493,9 @@ describe('Discover filters', () => {
       'Flexible',
     ])
 
-    await user.selectOptions(collaboration, 'One-off or ongoing')
-    expect(visibleTitles()).toEqual(['Running Campaign'])
-    expect(searchParams(location)).toEqual({ collaboration: 'One-off or Ongoing' })
-
     await user.selectOptions(collaboration, 'Ongoing')
     expect(visibleTitles()).toEqual(['Boxing with Lionheart', 'Activewear Campaign'])
+    expect(searchParams(location)).toEqual({ collaboration: 'Ongoing' })
 
     await user.selectOptions(collaboration, 'Any')
     await user.selectOptions(deliverables, 'Fixed')

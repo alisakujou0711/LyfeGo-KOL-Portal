@@ -23,6 +23,12 @@ Two portals over one shared backend: the **Creator Portal** (`creator-portal/`),
 
    Keep the venv activated in any terminal where you run `npm run dev` or the tests — the scripts call `python`.
 4. **Create the env file:** copy `backend/.env.example` to `backend/.env` and fill in your MySQL details and the demo Admin's `ADMIN_EMAIL` / `ADMIN_PASSWORD`. `backend/.env` is git-ignored; the API and its tests read credentials only from this file.
+
+   ```
+   ADMIN_EMAIL=admin@lyfego.local
+   ADMIN_PASSWORD=lyfego-demo-admin
+   ```
+
 5. **Reset and seed the database:** `npm run db:reset` drops the database named in `backend/.env` (normally `lyfego`), recreates its tables and seeds the demo data (see `backend/app/seed.py`). **It deletes everything in that database.** It uses only `backend/.env` (no prompts) and is safe to run as often as you like: run it whenever you want a fresh demo, and after pulling schema changes.
    - **Discover shows nine Opportunities, in the design's order:** Tennis, Pilates, Boxing, Bouldering, Coffee, Recovery, Activewear, Dining and Wellness Product. Two more are reachable only by link: `/opportunity/10`, Yoga Flow with Sublime (fully booked), and `/opportunity/11`, Padel Session (Closed).
    - **Every creator-facing situation is covered:** a weekly class (Tennis, Saturdays 8–9pm), a weekly class on two weekdays (Padel, Tuesdays and Thursdays, Closed until an Admin reopens it), Limited Spots, a Filled Session beside open ones, a cancelled Session, Paid with and without a perk, and Applications in all four statuses.

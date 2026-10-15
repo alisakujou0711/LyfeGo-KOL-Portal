@@ -133,14 +133,14 @@ describe('Create Opportunity', () => {
     await user.click(within(basis).getByRole('button', { name: 'Flat fee' }))
     expect(pressed(basis)).toHaveTextContent('Flat fee')
     await user.type(within(collaboration).getByLabelText('Payment Conditions / Notes', { exact: false }), 'Within 14 days')
-    await user.click(within(collaboration).getByRole('button', { name: 'One-off or Ongoing' }))
+    await user.click(within(collaboration).getByRole('button', { name: 'Ongoing' }))
     await saveDraft(user)
 
     await screen.findByRole('heading', { name: 'Creator Opportunities' })
     expect(saves[0].body).toMatchObject({
       compensationType: 'Paid', currency: 'USD', paymentAmount: '100.50', paymentBasis: 'Flat fee',
       paymentNotes: 'Within 14 days',
-      collaborationType: 'One-off or Ongoing',
+      collaborationType: 'Ongoing',
     })
   })
 

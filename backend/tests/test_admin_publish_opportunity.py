@@ -36,7 +36,6 @@ def test_publishing_an_empty_form_is_refused_with_every_missing_field(client, db
     assert response.json()["errors"] == {
         "title": "Opportunity title is required",
         "partner": "Partner / brand name is required",
-        "heroImage": "Add a cover image",
         "aboutExperience": "About the experience is required",
         "whatCreatorReceives": "Specify what the creator receives",
         "deliverables": "Add at least one deliverable",

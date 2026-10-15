@@ -22,7 +22,7 @@ export const CATEGORIES = ['Sport', 'Lifestyle']
 export const COMPENSATION_TYPES = ['Barter', 'Paid']
 export const CURRENCIES = ['SGD', 'USD']
 export const PAYMENT_BASES = ['Per completed collaboration', 'Per post', 'Flat fee']
-export const COLLABORATION_TYPES = ['One-off', 'One-off or Ongoing', 'Ongoing']
+export const COLLABORATION_TYPES = ['One-off', 'Ongoing']
 export const DELIVERABLE_TYPES = ['Fixed', 'Flexible']
 export const PUBLISHING_STATUSES = ['Draft', 'Live', 'Closed']
 

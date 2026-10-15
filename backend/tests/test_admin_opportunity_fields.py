@@ -203,5 +203,9 @@ def test_an_older_rows_unknown_levels_load_as_all_levels(client, db, signed_in):
 
 # Cover image
 
-def test_publishing_needs_a_cover_image(client, db, signed_in):
-    assert errors_of(create(client, {**LIVE, "heroImage": "  "})) == {"heroImage": "Add a cover image"}
+def test_publishing_needs_no_cover_image(client, db, signed_in):
+    # Optional, as in the Figma (to_ask.md A6); the Creator Portal shows a plain grey area instead.
+    saved = created(client, {**LIVE, "heroImage": "  "})
+
+    assert saved["publishingStatus"] == "Live"
+    assert saved["heroImage"] == ""

@@ -44,7 +44,7 @@ CATEGORIES = ("Sport", "Lifestyle")
 COMPENSATION_TYPES = ("Barter", "Paid")
 CURRENCIES = ("SGD", "USD")
 PAYMENT_BASES = ("Per completed collaboration", "Per post", "Flat fee")
-COLLABORATION_TYPES = ("One-off", "One-off or Ongoing", "Ongoing")
+COLLABORATION_TYPES = ("One-off", "Ongoing")
 DELIVERABLE_TYPES = ("Fixed", "Flexible")
 EXPERIENCE_LEVELS = ("Beginner", "Intermediate", "Advanced", "All Levels", "Not Applicable")
 LEVELS_ON_THEIR_OWN = ("All Levels", "Not Applicable")
@@ -126,7 +126,6 @@ _FIELD_ORDER = (
 _REQUIRED_TO_PUBLISH = {
     "title": "Opportunity title is required",
     "partner": "Partner / brand name is required",
-    "heroImage": "Add a cover image",  # FS §5.1, to_ask.md A6
     "aboutExperience": "About the experience is required",
     "area": "Area / neighbourhood is required",
 }

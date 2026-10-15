@@ -30,7 +30,7 @@ FILLED_FORM = {
     "paymentAmount": 150,
     "paymentBasis": "Per post",
     "paymentNotes": "Paid within 14 days",
-    "collaborationType": "One-off or Ongoing",
+    "collaborationType": "Ongoing",
     "deliverableType": "Flexible",
     "deliverableNote": "Final deliverables agreed with the partner.",
     "deliverables": ["1 × Instagram Reel", "3 × Stories"],

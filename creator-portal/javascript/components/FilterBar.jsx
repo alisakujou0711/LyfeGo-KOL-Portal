@@ -6,7 +6,6 @@ const COMPENSATION_TYPES = ['Barter', 'Paid']
 const COLLABORATION_TYPES = [
   { value: 'One-off', label: 'One-off' },
   { value: 'Ongoing', label: 'Ongoing' },
-  { value: 'One-off or Ongoing', label: 'One-off or ongoing' },
 ]
 const DELIVERABLE_TYPES = [
   { value: 'Fixed', label: 'Fixed' },
